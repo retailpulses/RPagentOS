@@ -1,0 +1,52 @@
+[
+  {
+    "spu_code": "SPU-ERROR-TEST-001",
+    "product_title": "テスト正常商品",
+    "category": "家電・AV機器",
+    "sku": "SKU-ERROR-TEST-001-WH",
+    "variant_name": "ホワイト",
+    "color": "ホワイト",
+    "size_text": null,
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "external_listing_id": "listing-error-test-001",
+    "listing_title": "テスト正常商品 ホワイト",
+    "url": "https://example.com/listing-error-test-001",
+    "current_price": 5000.00,
+    "stock_qty": 2,
+    "listing_status": "active",
+    "raw_payload": { "source": "error-test", "condition": "新品" }
+  },
+  {
+    "spu_code": "SPU-ERROR-TEST-002",
+    "product_title": "テストSKU欠損商品",
+    "category": "フード・ドリンク",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "external_listing_id": "listing-error-test-002",
+    "listing_title": "テストSKU欠損商品",
+    "url": "https://example.com/listing-error-test-002",
+    "current_price": 1200.00,
+    "stock_qty": 10,
+    "listing_status": "active",
+    "raw_payload": { "source": "error-test", "condition": "新品" }
+  },
+  {
+    "spu_code": "SPU-ERROR-TEST-003",
+    "product_title": "テスト正常商品2",
+    "category": "ファッション",
+    "sku": "SKU-ERROR-TEST-003-RD",
+    "variant_name": "レッド",
+    "color": "レッド",
+    "size_text": "L",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "external_listing_id": "listing-error-test-003",
+    "listing_title": "テスト正常商品2 レッド L",
+    "url": "https://example.com/listing-error-test-003",
+    "current_price": 3200.00,
+    "stock_qty": 1,
+    "listing_status": "active",
+    "raw_payload": { "source": "error-test", "condition": "新品" }
+  }
+]

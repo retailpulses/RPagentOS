@@ -1,0 +1,32 @@
+{
+  "name": "rpagentos",
+  "version": "1.0.0",
+  "description": "Retailpulses Agent OS Core — Shop4 promotion decision MVP",
+  "type": "module",
+  "scripts": {
+    "test:supabase": "tsx --env-file=.env.local src/test-supabase.ts",
+    "db:reset": "supabase db reset",
+    "db:push": "supabase db push",
+    "db:status": "supabase status",
+    "job:generate-candidates": "tsx --env-file=.env.local src/jobs/generate-promotion-candidates.ts",
+    "job:mock-decision": "tsx --env-file=.env.local src/jobs/run-agent-decision-mock.ts",
+    "job:approve": "tsx --env-file=.env.local src/jobs/approve-candidate.ts",
+    "job:execute-mock": "tsx --env-file=.env.local src/jobs/execute-approved-mock.ts",
+    "flow:mock": "npm run job:generate-candidates && npm run job:mock-decision && npm run job:approve && npm run job:execute-mock",
+    "flow:mock:v2": "tsx --env-file=.env.local src/jobs/run-mock-flow.ts",
+    "job:import-listings:json": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts",
+    "job:import-listings:json:error-test": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts --file=data/sample-shop4-listings-with-error.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

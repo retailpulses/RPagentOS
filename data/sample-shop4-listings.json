@@ -1,0 +1,46 @@
+[
+  {
+    "spu_code": "SPU-TEST-002",
+    "product_title": "ワイヤレスイヤホン",
+    "category": "家電・AV機器",
+    "sku": "SKU-TEST-002-WH",
+    "variant_name": "ホワイト",
+    "color": "ホワイト",
+    "size_text": null,
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "external_listing_id": "listing-test-002",
+    "listing_title": "ワイヤレスイヤホン ホワイト",
+    "url": "https://example.com/listing-test-002",
+    "current_price": 2500.00,
+    "stock_qty": 3,
+    "listing_status": "active",
+    "raw_payload": {
+      "source": "sample",
+      "condition": "新品",
+      "shipping_paid_by": "seller"
+    }
+  },
+  {
+    "spu_code": "SPU-TEST-003",
+    "product_title": "Bluetoothスピーカー",
+    "category": "家電・AV機器",
+    "sku": "SKU-TEST-003-BK",
+    "variant_name": "ブラック",
+    "color": "ブラック",
+    "size_text": "M",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "external_listing_id": "listing-test-003",
+    "listing_title": "Bluetoothスピーカー ブラック M",
+    "url": "https://example.com/listing-test-003",
+    "current_price": 1800.00,
+    "stock_qty": 0,
+    "listing_status": "active",
+    "raw_payload": {
+      "source": "sample",
+      "condition": "中古",
+      "shipping_paid_by": "buyer"
+    }
+  }
+]
