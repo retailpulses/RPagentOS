@@ -4,6 +4,7 @@ node_modules
 .env.production
 .DS_Store
 dist
+apps/web/dist
 coverage
 supabase/.branches
 supabase/.temp

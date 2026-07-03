@@ -15,7 +15,11 @@
     "flow:mock": "npm run job:generate-candidates && npm run job:mock-decision && npm run job:approve && npm run job:execute-mock",
     "flow:mock:v2": "tsx --env-file=.env.local src/jobs/run-mock-flow.ts",
     "job:import-listings:json": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts",
-    "job:import-listings:json:error-test": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts --file=data/sample-shop4-listings-with-error.json"
+    "job:import-listings:json:error-test": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts --file=data/sample-shop4-listings-with-error.json",
+    "web:dev": "npm run dev --prefix apps/web",
+    "web:build": "npm run build --prefix apps/web",
+    "web:typecheck": "npm run typecheck --prefix apps/web",
+    "typecheck:all": "tsc --noEmit && npm run web:typecheck"
   },
   "keywords": [],
   "author": "",

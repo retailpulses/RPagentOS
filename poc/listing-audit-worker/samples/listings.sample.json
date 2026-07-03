@@ -1,0 +1,156 @@
+[
+  {
+    "listing_id": "sample-001",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "title": "ガラスディスプレイキャビネット コレクションケース 4段 ブラック 強化ガラス 全面ガラス サイズ:幅42.5×奥行36.5×高さ162cm 1年保証付き",
+    "description": "ホムブリスショップへようこそ。すべての商品は未開封の新品です。\n\n【商品の特徴】\n・コレクションを引き立てて、お部屋にも馴染む収納ケース\n・360度どの角度からでも見える全面ガラスタイプ\n・4面ガラスなので開放感のある空間を演出\n・ガラス棚板サイズ:38.5×32.2×0.5cm 耐荷重5kg\n・素材:プリント紙化粧繊維板（MDF）、強化ガラス5MM\n・お客様組立商品です。2人以上で組み立てをおこなってください。\n\n【商品仕様】\nカラー：ブラック\n素材：MDF+glass",
+    "price": 12830,
+    "stock": 2,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "WF320581BAA",
+      "spu": "SPU-CABINET-004",
+      "color": "ブラック",
+      "size": "幅42.5×奥行36.5×高さ162cm",
+      "material": "MDF+強化ガラス"
+    },
+    "image_paths": [
+      "samples/images/sample-001-main.png",
+      "samples/images/sample-001-side.png"
+    ]
+  },
+  {
+    "listing_id": "sample-002",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "title": "コレクションケース",
+    "description": "【商品の特徴】\n・コレクションを引き立てる収納ケース\n・4面ガラスで開放感のある空間を演出\n・ガラス棚板サイズ:38.5×32.2×0.5cm\n・素材:プリント紙化粧繊維板（MDF）、強化ガラス5MM\n・お客様組立商品です。2人以上で組み立てをおこなってください。\n\n【商品仕様】\nカラー：ブラック\n素材：MDF+glass\nサイズ：幅42.5×奥行36.5×高さ86cm",
+    "price": 9800,
+    "stock": 3,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "WF320579BAA",
+      "spu": "SPU-CABINET-001",
+      "color": "ブラック",
+      "size": "幅42.5×奥行36.5×高さ86cm",
+      "material": "MDF+強化ガラス"
+    },
+    "image_paths": []
+  },
+  {
+    "listing_id": "sample-003",
+    "platform": "rakuten",
+    "shop_code": "rakuten-hombliss",
+    "title": "ガラスディスプレイキャビネット 4段 ホワイト 強化ガラス 全面ガラス コレクションケース 幅42.5×奥行36.5×高さ120cm 1年保証付き",
+    "description": "おしゃれなガラスケースです。",
+    "price": 12180,
+    "stock": 5,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "WF320580WAA",
+      "spu": "SPU-CABINET-005",
+      "color": "ホワイト",
+      "size": "幅42.5×奥行36.5×高さ120cm",
+      "material": "MDF+glass"
+    },
+    "image_paths": []
+  },
+  {
+    "listing_id": "sample-004",
+    "platform": "rakuten",
+    "shop_code": "rakuten-hombliss",
+    "title": "コレクションシェルフ 幅80cm 大容量 ガラスディスプレイキャビネット おしゃれ 棚高さ調節可能 強化ガラス 1年保証付き",
+    "description": "【商品の特徴】\n・商品サイズ：W80×35×H86cm\n・材質：炭素鋼・5MM強化ガラス\n・ホコリから守るガラス扉\n・モダンで洗練されたデザイン\n・調整できる可動棚\n・お客様組立商品です。\n\n【商品仕様】\nカラー：ホワイト\n素材：Glass+Metal",
+    "price": 16250,
+    "stock": 4,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "N515P252400W",
+      "spu": "SPU-CABINET-003",
+      "color": "",
+      "size": "",
+      "material": ""
+    },
+    "image_paths": []
+  },
+  {
+    "listing_id": "sample-005",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "title": "コレクションケース 3段 ブラック 鍵つき フィギュアケース ガラスディスプレイキャビネット 強化ガラス 全面ガラス 幅42.5×奥行36.5×高さ86cm 1年保証付き",
+    "description": "ホムブリスショップへようこそ。すべての商品は未開封の新品です。\n\n【商品の特徴】\n・360度全面ガラスで美しくディスプレイ\n・無駄な装飾なしのフラットデザイン\n・4面ガラス仕様で開放感を演出\n・鍵付きで大切なコレクションを保護\n\n【商品仕様】\nカラー：ブラック\n素材：MDF+glass\nサイズ：幅42.5×奥行36.5×高さ86cm",
+    "price": 2500,
+    "stock": 1,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "WF320579BAA-KEY",
+      "spu": "SPU-CABINET-001",
+      "color": "ブラック",
+      "size": "幅42.5×奥行36.5×高さ86cm",
+      "material": "MDF+glass"
+    },
+    "image_paths": [
+      "samples/images/sample-005-main.png"
+    ]
+  },
+  {
+    "listing_id": "sample-006",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "title": "ワイド コレクションケース 4段 ベージュ 大容量 ガラスディスプレイキャビネット 背面ミラー 強化ガラス棚 サイズ:幅60×奥行43×高さ88cm 1年保証付き",
+    "description": "ホムブリス本店へようこそ。\n\n【商品特徴】\n・素材：強化ガラス&MDF\n・3カラー選択可能：ホワイト&ライトグリーン&パープル\n・ガラス棚板は高さ調節可能\n・背面ミラー仕様でフィギュアが映える\n・ワンプッシュで簡単開閉\n・お客様組立商品です。\n\n【商品仕様】\nカラー：ベージュ\n素材：MDF+glass\nサイズ：幅60×奥行43×高さ88cm",
+    "price": 22650,
+    "stock": 0,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "N515P196885B",
+      "spu": "SPU-CABINET-002",
+      "color": "ベージュ",
+      "size": "幅60×奥行43×高さ88cm",
+      "material": "MDF+強化ガラス"
+    },
+    "image_paths": [
+      "samples/images/sample-006-main.png",
+      "samples/images/sample-006-detail.png"
+    ]
+  },
+  {
+    "listing_id": "sample-007",
+    "platform": "mercari",
+    "shop_code": "shop4",
+    "title": "コレクションケース 幅40cm ホワイト ガラスディスプレイキャビネット おしゃれ 棚高さ調節可能 強化ガラス サイズ:幅40×奥行35×高さ86cm",
+    "description": "",
+    "price": 9840,
+    "stock": 2,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "N515P252389W",
+      "spu": "SPU-CABINET-003",
+      "color": "ホワイト",
+      "size": "幅40×奥行35×高さ86cm",
+      "material": "ガラス+Metal"
+    },
+    "image_paths": [
+      "samples/images/sample-007-main.png"
+    ]
+  },
+  {
+    "listing_id": "sample-008",
+    "platform": "rakuten",
+    "shop_code": "rakuten-hombliss",
+    "title": "コレクションケース 3段 ホワイト 鍵つき フィギュアケース ガラスディスプレイキャビネット 全面ガラス 強化ガラス 幅42.5×奥行36.5×高さ86cm",
+    "description": "ホムブリスショップへようこそ。\n\n【商品の特徴】\n・360度全面ガラスで美しくディスプレイ\n・無駄な装飾なしのフラットデザイン\n・4面ガラス仕様で開放感を演出\n・鍵付きでコレクションを保護\n・ガラス棚板サイズ:38.5×32.2×0.5cm 耐荷重5kg\n\n【商品仕様】\nカラー：ホワイト\n素材：MDF+glass\nサイズ：幅42.5×奥行36.5×高さ86cm",
+    "price": 8570,
+    "stock": 0,
+    "category": "家具・収納",
+    "product_facts": {
+      "sku": "WF320579WAA",
+      "spu": "SPU-CABINET-001",
+      "color": "ホワイト",
+      "size": "幅42.5×奥行36.5×高さ86cm",
+      "material": "MDF+glass"
+    },
+    "image_paths": []
+  }
+]

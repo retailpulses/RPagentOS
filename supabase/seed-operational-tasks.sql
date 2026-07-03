@@ -1,0 +1,5 @@
+-- Operational Task Management seed
+--
+-- No dummy tasks are inserted by default.
+-- Keep this file as a no-op because supabase/config.toml references it during
+-- local db reset.

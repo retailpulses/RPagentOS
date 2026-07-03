@@ -120,6 +120,29 @@ Individual job scripts:
 | `npm run db:reset` | Reset local DB, apply all migrations, run seed.sql |
 | `npm run db:push` | Push migrations to linked remote project |
 | `npm run db:status` | Show Supabase local status |
+| `npm run web:dev` | Start the Operational Task Management web app |
+| `npm run web:build` | Build the web app |
+| `npm run web:typecheck` | Type-check the web app |
+| `npm run typecheck:all` | Type-check root scripts and the web app |
+
+## Operational Task Management web app
+
+The MVP web app lives in `apps/web`.
+
+Create `apps/web/.env.local` from `apps/web/.env.example` and fill:
+
+```bash
+VITE_SUPABASE_URL=<supabase_api_url>
+VITE_SUPABASE_ANON_KEY=<supabase_anon_key>
+```
+
+For local development, run `supabase start`, copy the local anon key from
+`supabase status`, then run:
+
+```bash
+npm run db:reset
+npm run web:dev
+```
 
 ## Security notes
 
@@ -130,3 +153,7 @@ Individual job scripts:
 ## Schema status
 
 Current schema is **v1 — initial version**. It will evolve as features are added. See `supabase/migrations/` for the full DDL.
+
+## Development packages
+
+- [Operational Task Management MVP](docs/development/operational-task-management-mvp/README.md) - prepared scope, schema proposal, implementation backlog, and acceptance checklist for the human-first, agent-ready task management module.

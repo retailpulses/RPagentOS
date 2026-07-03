@@ -34,7 +34,7 @@ The MVP should prove that the system can:
 
 1. Import or seed listing data.
 2. Generate promotion candidates based on simple business rules.
-3. Create mock Agent decisions.
+3. Create mock Agent decisions.//what is mock decisions and why mock?
 4. Record human approval.
 5. Record execution logs.
 6. Trace all objects back to a single `agent_run`.
@@ -53,7 +53,7 @@ Observe → Decide → Review → Execute → Log → Review again
 The current MVP explicitly does **not** include:
 
 - Real Mercari, Rakuten, or Amazon API execution.
-- Qwen / local LLM integration.
+- Qwen / local LLM integration.//why not included? then how the agent OS suppose to work?
 - Full UI.
 - Complex permission system.
 - Supabase Row Level Security.
@@ -141,7 +141,7 @@ It should **not** become a dumping ground for all business data.
 |---|---|
 | Product images | Keep in Cloudflare R2 |
 | Raw CSV exports | Keep as files / R2 later |
-| Full historical orders | Do not migrate yet |
+| Full historical orders | Do not migrate yet |//this will be very important soon as we try to analyze margin and product trends
 | Full customer support history | Do not migrate yet |
 | Airtable dashboards | Keep temporarily |
 | Baserow operational tables | Keep temporarily |
@@ -772,7 +772,7 @@ Current recommended technical choices:
 
 MVP v0.3 is done when:
 
-1. JSON listing import works.
+1. JSON listing import works.//why JSON listings. I only have listing files in CSV file
 2. Imported listings are normalized into product / variant / platform listing tables.
 3. Candidate generation works only on valid active listings with stock and price.
 4. Mock flow v2 runs successfully after import.
