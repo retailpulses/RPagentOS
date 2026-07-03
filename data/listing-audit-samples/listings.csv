@@ -1,0 +1,3 @@
+external_listing_id,platform,shop_code,sku,listing_title,description,current_price,stock_qty,listing_status,category,image_urls
+csv-listing-001,mercari,shop4,SKU-CAT-001,猫ベッド グレー M,"ふわふわ素材の猫用ベッドです。サイズ M、カラー グレー。新品、送料込みで発送します。底面は滑りにくい仕様です。",2490,12,active,ペット用品,https://example.com/cat-bed-main.jpg|https://example.com/cat-bed-detail.jpg
+csv-listing-002,mercari,shop4,SKU-DOG-002,犬服,"かわいい犬服です。",199,5,active,ペット用品,
