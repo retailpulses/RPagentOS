@@ -5,6 +5,7 @@ node_modules
 .DS_Store
 dist
 apps/web/dist
+outputs/
 coverage
 supabase/.branches
 supabase/.temp

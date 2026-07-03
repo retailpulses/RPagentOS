@@ -16,6 +16,7 @@
     "flow:mock:v2": "tsx --env-file=.env.local src/jobs/run-mock-flow.ts",
     "job:import-listings:json": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts",
     "job:import-listings:json:error-test": "tsx --env-file=.env.local src/jobs/import-listings-from-json.ts --file=data/sample-shop4-listings-with-error.json",
+    "job:audit-listings": "tsx src/jobs/audit-listings.ts",
     "web:dev": "npm run dev --prefix apps/web",
     "web:build": "npm run build --prefix apps/web",
     "web:typecheck": "npm run typecheck --prefix apps/web",

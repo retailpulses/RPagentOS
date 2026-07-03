@@ -89,6 +89,21 @@ This imports from `data/sample-shop4-listings-with-error.json`, which contains 2
 rows and 1 row intentionally missing a `sku`. The valid rows are imported normally;
 the bad row is recorded in `import_errors` without blocking the other rows.
 
+## Listing audit
+
+Run deterministic listing quality checks against local JSON or CSV listing exports:
+
+```bash
+npm run job:audit-listings
+npm run job:audit-listings -- --file=data/listing-audit-samples/listings.csv
+```
+
+The module lives in `src/packages/listing-audit`. It normalizes listing rows,
+scores title, description, image coverage, and pricing/stock risk, then writes
+reviewable results to `outputs/listing-audit/audit-results.json` and
+`outputs/listing-audit/audit-results.jsonl`. It does not execute marketplace
+changes.
+
 ## Recommended workflow
 
 ```bash
@@ -103,6 +118,7 @@ Individual job scripts:
 |---|---|
 | `npm run job:import-listings:json` | Upsert products/variants/listings from a JSON file |
 | `npm run job:import-listings:json:error-test` | Same as above, using the error-test data file |
+| `npm run job:audit-listings` | Audit local JSON or CSV listing exports and write reviewable results |
 | `npm run job:generate-candidates` | Create promotion candidates from active mercari/shop4 listings |
 | `npm run job:mock-decision` | Generate mock agent decisions for pending candidates |
 | `npm run job:approve` | Approve the first pending candidate |
@@ -116,6 +132,7 @@ Individual job scripts:
 | `npm run flow:mock:v2` | (v2) Same pipeline with run_id tracing via agent_runs table |
 | `npm run job:import-listings:json` | Upsert product/variant/listing data from a local JSON file |
 | `npm run job:import-listings:json:error-test` | Test import with intentionally bad rows |
+| `npm run job:audit-listings` | Run deterministic listing quality audit against a local JSON or CSV file |
 | `npm run test:supabase` | Test Supabase connection and query mercari/shop4 listings |
 | `npm run db:reset` | Reset local DB, apply all migrations, run seed.sql |
 | `npm run db:push` | Push migrations to linked remote project |
