@@ -198,6 +198,10 @@ function chooseAction(input: {
     return { type: 'price_check', priority: 'high', reason: 'pricing issue can create direct margin or order risk' };
   }
 
+  if (input.pricingRisk === 'medium') {
+    return { type: 'price_check', priority: 'medium', reason: 'pricing or stock signal should be checked before content cleanup' };
+  }
+
   if (input.imageScore < 70) {
     return { type: 'image_fix', priority: input.overallScore < 60 ? 'high' : 'medium', reason: 'image coverage is weak for buyer review' };
   }
@@ -206,7 +210,7 @@ function chooseAction(input: {
     return { type: 'rewrite', priority: input.overallScore < 65 ? 'high' : 'medium', reason: 'listing content is likely suppressing conversion or search quality' };
   }
 
-  if (input.pricingRisk === 'medium' || input.listingStatus === 'active') {
+  if (input.listingStatus && input.listingStatus !== 'active') {
     return { type: 'manual_review', priority: 'medium', reason: 'listing is acceptable but has operational review signals' };
   }
 
