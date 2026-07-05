@@ -16,7 +16,8 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@lib/*": ["../../src/lib/*"]
+      "@lib/*": ["../../src/lib/*"],
+      "@packages/*": ["../../src/packages/*"]
     },
     "baseUrl": "."
   },

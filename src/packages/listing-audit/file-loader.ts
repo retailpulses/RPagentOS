@@ -1,9 +1,8 @@
-import { extname } from 'path';
 import type { ListingAuditInput } from './types.js';
 import { normalizePlatform } from './audit.js';
 
 export function parseListingAuditFile(content: string, filePath: string): ListingAuditInput[] {
-  const extension = extname(filePath).toLowerCase();
+  const extension = getFileExtension(filePath);
 
   if (extension === '.csv') {
     return parseCsv(content).map((row, index) => normalizeRow(row, index));
@@ -15,6 +14,14 @@ export function parseListingAuditFile(content: string, filePath: string): Listin
   }
 
   return parsed.map((row, index) => normalizeRow(asRecord(row), index));
+}
+
+function getFileExtension(filePath: string): string {
+  const cleanPath = filePath.split(/[?#]/)[0] ?? filePath;
+  const lastSlash = Math.max(cleanPath.lastIndexOf('/'), cleanPath.lastIndexOf('\\'));
+  const fileName = cleanPath.slice(lastSlash + 1);
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
 }
 
 function normalizeRow(row: Record<string, unknown>, index: number): ListingAuditInput {

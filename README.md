@@ -161,6 +161,14 @@ npm run db:reset
 npm run web:dev
 ```
 
+The operator UI includes a local Listing Audit page at `/listing`. It can
+paste or upload CSV/JSON listing exports, run the deterministic audit package in
+the browser, filter recommendations, and inspect issue details before creating
+follow-up tasks.
+
+Task management is available at `/task`, with board and creation aliases under
+`/task/board` and `/task/new`.
+
 ## Security notes
 
 - `SUPABASE_SERVICE_ROLE_KEY` has full admin access.

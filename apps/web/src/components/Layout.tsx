@@ -7,13 +7,16 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className="sidebar">
         <h1>RPagentOS</h1>
         <nav>
-          <NavLink to="/today" className={({ isActive }) => isActive ? 'active' : ''}>
+          <NavLink to="/task" className={({ isActive }) => isActive ? 'active' : ''}>
             Today
           </NavLink>
-          <NavLink to="/board" className={({ isActive }) => isActive ? 'active' : ''}>
+          <NavLink to="/task/board" className={({ isActive }) => isActive ? 'active' : ''}>
             Board
           </NavLink>
-          <NavLink to="/tasks/new" className={({ isActive }) => isActive ? 'active' : ''}>
+          <NavLink to="/listing" className={({ isActive }) => isActive ? 'active' : ''}>
+            Listing Audit
+          </NavLink>
+          <NavLink to="/task/new" className={({ isActive }) => isActive ? 'active' : ''}>
             + New Task
           </NavLink>
         </nav>
