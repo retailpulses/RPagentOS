@@ -20,7 +20,14 @@
     "web:dev": "npm run dev --prefix apps/web",
     "web:build": "npm run build --prefix apps/web",
     "web:typecheck": "npm run typecheck --prefix apps/web",
-    "typecheck:all": "tsc --noEmit && npm run web:typecheck"
+    "typecheck:all": "tsc --noEmit && npm run web:typecheck",
+    "import:product-master": "tsx --env-file=.env.local src/jobs/import-product-master.ts",
+    "import:mercari": "tsx --env-file=.env.local src/jobs/import-mercari.ts",
+    "import:rakuten": "tsx --env-file=.env.local src/jobs/import-rakuten.ts",
+    "import:amazon": "tsx --env-file=.env.local src/jobs/import-amazon.ts",
+    "import:resolve-links": "tsx --env-file=.env.local src/jobs/resolve-links.ts",
+    "import:validate": "tsx --env-file=.env.local src/jobs/validate-imports.ts",
+    "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],
   "author": "",
