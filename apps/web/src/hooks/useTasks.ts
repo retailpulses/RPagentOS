@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { TaskCardRow, TaskFilters, TaskDetailRow, TaskRow, CreateTaskInput, UpdateTaskInput, CreateTaskTargetInput, TaskTargetRow, TaskStepRow, TaskCommentRow, TaskLogRow, TaskAttachmentRow, CreateTaskAttachmentInput, TaskSelectFieldKey, TaskSelectOptionRow } from '@lib/task-types'
 
 const DEFAULT_PAGE_SIZE = 50
+const MISSING_SUPABASE_MESSAGE = 'Task data is not connected. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for this deployment.'
 
 export const FALLBACK_TASK_SELECT_OPTIONS: Record<TaskSelectFieldKey, Array<{ option_key: string; label: string }>> = {
   task_type: [
@@ -71,6 +72,8 @@ function fallbackRows(fieldKey: TaskSelectFieldKey): TaskSelectOptionRow[] {
 }
 
 async function listTaskSelectOptions(fieldKey: TaskSelectFieldKey): Promise<TaskSelectOptionRow[]> {
+  if (!supabase) return fallbackRows(fieldKey)
+
   const { data, error } = await supabase
     .from('task_select_options')
     .select('*')
@@ -93,6 +96,8 @@ async function listTasks(
   page = 1,
   pageSize = DEFAULT_PAGE_SIZE,
 ): Promise<{ data: TaskCardRow[]; count: number }> {
+  if (!supabase) return { data: [], count: 0 }
+
   let query = supabase
     .from('tasks')
     .select(
@@ -165,6 +170,8 @@ async function listTasks(
 }
 
 async function getTaskDetail(id: string): Promise<TaskDetailRow | null> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data: task, error: taskError } = await supabase
     .from('tasks')
     .select('*')
@@ -199,6 +206,8 @@ async function getTaskDetail(id: string): Promise<TaskDetailRow | null> {
 }
 
 async function createTask(input: CreateTaskInput): Promise<TaskRow> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data, error } = await supabase
     .from('tasks')
     .insert({
@@ -226,6 +235,8 @@ async function createTask(input: CreateTaskInput): Promise<TaskRow> {
 }
 
 async function linkTarget(taskId: string, input: CreateTaskTargetInput): Promise<TaskTargetRow> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data, error } = await supabase
     .from('task_targets')
     .insert({
@@ -243,6 +254,8 @@ async function linkTarget(taskId: string, input: CreateTaskTargetInput): Promise
 }
 
 async function updateTaskStatus(id: string, status: string): Promise<TaskRow> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const patch: Record<string, unknown> = { status }
   if (status === 'done') {
     patch['completed_at'] = new Date().toISOString()
@@ -272,6 +285,8 @@ async function updateTaskStatus(id: string, status: string): Promise<TaskRow> {
 }
 
 async function updateTask(id: string, input: UpdateTaskInput): Promise<TaskRow> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data, error } = await supabase
     .from('tasks')
     .update(input)
@@ -284,6 +299,8 @@ async function updateTask(id: string, input: UpdateTaskInput): Promise<TaskRow> 
 }
 
 async function addTaskAttachment(taskId: string, input: CreateTaskAttachmentInput): Promise<TaskAttachmentRow> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data, error } = await supabase
     .from('task_attachments')
     .insert({
@@ -498,6 +515,8 @@ export function useAddTaskAttachment() {
 }
 
 async function removeTaskAttachment(attachmentId: string): Promise<void> {
+  if (!supabase) throw new Error(MISSING_SUPABASE_MESSAGE)
+
   const { data: att, error: fetchError } = await supabase
     .from('task_attachments')
     .select('task_id, file_name')
