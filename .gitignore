@@ -9,3 +9,4 @@ outputs/
 coverage
 supabase/.branches
 supabase/.temp
+data/
