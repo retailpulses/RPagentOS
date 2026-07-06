@@ -99,9 +99,9 @@ export default function ListingAudit() {
 
   const handleRunQwenReview = async (item: ListingWorkItem) => {
     setActionError(null)
-    const ok = await qwenRunner.run(item.id)
-    if (!ok) {
-      setActionError(qwenRunner.error ?? 'Failed to run Qwen review')
+    const result = await qwenRunner.run(item.id)
+    if (!result.ok) {
+      setActionError(result.error ?? 'Failed to run Qwen review')
       return
     }
     await qwenReview.refetch()

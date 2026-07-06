@@ -301,7 +301,7 @@ export function useRunQwenReview() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const run = async (workItemId: string, force = false): Promise<boolean> => {
+  const run = async (workItemId: string, force = false): Promise<{ ok: boolean; error?: string }> => {
     setLoading(true)
     setError(null)
     try {
@@ -312,10 +312,11 @@ export function useRunQwenReview() {
       })
       const body = await response.json().catch(() => ({})) as { error?: string }
       if (!response.ok) throw new Error(body.error ?? `Qwen bridge returned ${response.status}`)
-      return true
+      return { ok: true }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to run Qwen review')
-      return false
+      const message = e instanceof Error ? e.message : 'Failed to run Qwen review'
+      setError(message)
+      return { ok: false, error: message }
     } finally {
       setLoading(false)
     }
