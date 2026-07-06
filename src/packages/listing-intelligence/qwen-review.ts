@@ -98,12 +98,13 @@ function asRecord(value: unknown): JsonRecord {
 
 function promptProfileFor(item: ListingWorkItemRow): string {
   if (item.platform === 'amazon') return 'amazon_mapping_audit_v1';
+  if (item.platform === 'mercari') return 'mercari_listing_audit_v1';
   return 'rakuten_listing_audit_v1';
 }
 
 function assertEligible(item: ListingWorkItemRow): void {
-  if (item.platform !== 'rakuten' && item.platform !== 'amazon') {
-    throw new Error(`Qwen review is only enabled for Rakuten/Amazon MVP-1 work items. Got platform=${item.platform ?? '-'}.`);
+  if (item.platform !== 'rakuten' && item.platform !== 'amazon' && item.platform !== 'mercari') {
+    throw new Error(`Qwen review is only enabled for Rakuten/Amazon/Mercari MVP-1 work items. Got platform=${item.platform ?? '-'}.`);
   }
   if (item.issue_type === 'missing_mapping' || item.recommended_action === 'create_mapping_task') {
     throw new Error('Unresolved mapping work items must be fixed deterministically before Qwen review.');
@@ -174,17 +175,26 @@ async function findReusableReview(item: ListingWorkItemRow, model: string): Prom
 }
 
 function buildSystemRules(item: ListingWorkItemRow): string {
-  const platformRules = item.platform === 'amazon'
-    ? [
+  let platformRules: string[];
+  if (item.platform === 'amazon') {
+    platformRules = [
       'Focus on Amazon offer/listing readiness and mapping consistency.',
       'This Amazon export may have limited content fields; do not invent title, description, category, price, or stock facts.',
       'Use mapping_fix only when the source context itself supports a mapping concern.',
-    ]
-    : [
+    ];
+  } else if (item.platform === 'mercari') {
+    platformRules = [
+      'Focus on Mercari Shops listing readiness from the available source context.',
+      'Review title clarity, image coverage, variant/SKU clarity, price/stock consistency, and obvious unsupported claims.',
+      'Do not produce CSV patches or marketplace mutations; recommend human task follow-up only.',
+    ];
+  } else {
+    platformRules = [
       'Focus on Rakuten listing content/readiness.',
       'Review title, catch copy, description signals, search tags, image coverage, variant clarity, and forbidden claims.',
       'Suggested Rakuten copy must stay grounded in the provided source context.',
     ];
+  }
 
   return [
     'You are the local Qwen reviewer inside RPagentOS Listing Intelligence MVP-1.',
@@ -213,7 +223,7 @@ function buildOutputContract(): JsonRecord {
 
 function buildPrompt(item: ListingWorkItemRow, repairErrors?: string[]): string {
   const request: JsonRecord = {
-    task: item.platform === 'amazon' ? 'amazon_mapping_audit' : 'rakuten_listing_audit',
+    task: item.platform === 'amazon' ? 'amazon_mapping_audit' : item.platform === 'mercari' ? 'mercari_listing_audit' : 'rakuten_listing_audit',
     required_json_keys: Object.keys(buildOutputContract()),
     allowed_risk_level: ['low', 'medium', 'high', 'critical'],
     allowed_action_type: ['no_action', 'rewrite', 'image_fix', 'price_check', 'mapping_fix', 'manual_review', 'create_task'],

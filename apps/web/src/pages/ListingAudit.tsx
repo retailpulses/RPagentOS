@@ -245,7 +245,7 @@ function WorkItemDetail({ item, review, reviewLoading, busy, onIgnore, onWaiting
         <button className="btn btn-primary" disabled={busy} onClick={onCreateTask}>Create Task</button>
         <button className="btn" disabled={busy || !qwenEligible} onClick={onRunQwenReview}>Run Qwen Review</button>
       </div>
-      {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen MVP-1 runs only for mapped Rakuten/Amazon audit items.</p>}
+      {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen runs only for mapped Rakuten/Amazon/Mercari audit items.</p>}
 
       <IssueBlock title="Trace" rows={[
         ['Family', item.product_family_id],
@@ -339,7 +339,7 @@ function isQwenEligible(item: ListingWorkItem) {
   const findingText = JSON.stringify([item.classification_reasons, item.deterministic_findings]).toLowerCase()
   return (
     item.workflow_type === 'audit_existing_listing'
-    && (item.platform === 'rakuten' || item.platform === 'amazon')
+    && (item.platform === 'rakuten' || item.platform === 'amazon' || item.platform === 'mercari')
     && item.issue_type !== 'missing_mapping'
     && item.recommended_action !== 'create_mapping_task'
     && !findingText.includes('missing_mapping')

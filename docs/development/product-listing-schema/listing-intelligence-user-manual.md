@@ -16,7 +16,7 @@ The workbench helps you:
 - filter the work queue by platform, shop, workflow, issue, status, hero-only, and search
 - inspect why each work item exists
 - create human tasks from work items
-- run local Qwen review for eligible Rakuten/Amazon audit items
+- run local Qwen review for eligible Rakuten/Amazon/Mercari audit items
 - keep AI review suggestions separate from source-of-truth product/listing facts
 
 The workbench does not publish listings, edit marketplace data, export CSVs, or automatically fix stock/price/mapping.
@@ -64,7 +64,7 @@ Common MVP issue types:
 
 ### Qwen Review
 
-Qwen review is a local AI review step for eligible Rakuten/Amazon work items.
+Qwen review is a local AI review step for eligible Rakuten/Amazon/Mercari work items.
 
 Qwen can summarize, score risk, and recommend next action. Qwen cannot change source facts or publish anything.
 
@@ -216,9 +216,9 @@ Use this when:
 - mapping requires human confirmation
 - content, images, or pricing require another source before action
 
-### Story 8: Run Qwen Review For Eligible Rakuten/Amazon Items
+### Story 8: Run Qwen Review For Eligible Rakuten/Amazon/Mercari Items
 
-As an operator, I want Qwen to review eligible Rakuten/Amazon audit items, so I get a structured second opinion before creating work.
+As an operator, I want Qwen to review eligible Rakuten/Amazon/Mercari audit items, so I get a structured second opinion before creating work.
 
 Prerequisite:
 
@@ -233,7 +233,7 @@ npm run qwen:bridge:cloud
 Steps:
 
 1. Open `/listing`.
-2. Filter to `rakuten` or `amazon`.
+2. Filter to `rakuten`, `amazon`, or `mercari`.
 3. Select an eligible `audit_existing_listing` item.
 4. Click `Run Qwen Review`.
 5. Wait for the local bridge to process the queued request.
@@ -271,7 +271,6 @@ Qwen is blocked when:
 - recommended action is `create_mapping_task`
 - hidden deterministic findings include unresolved mapping
 - item belongs to hero strategy workflow
-- item belongs to Mercari in MVP-1
 
 Expected result:
 
@@ -319,13 +318,13 @@ It does not:
 
 ### MVP-1 Limits
 
-MVP-1 adds local Qwen review for eligible Rakuten/Amazon audit items.
+MVP-1 adds local Qwen review for eligible Rakuten/Amazon/Mercari audit items.
 
 It does not:
 
 - run Qwen for every work item
 - run Qwen automatically for all queued work
-- support Mercari rewrite/batch workflows
+- support Mercari CSV rewrite/batch workflows
 - support hero strategy generation
 - publish listings
 - change price or stock
@@ -341,7 +340,7 @@ It does not:
    - missing images
    - unknown status
    - price/stock mismatch
-4. For eligible Rakuten/Amazon audit items, run Qwen review.
+4. For eligible Rakuten/Amazon/Mercari audit items, run Qwen review.
 5. Read the review and source context together.
 6. Create tasks for real work.
 7. Ignore or mark waiting input when appropriate.
@@ -383,7 +382,6 @@ The item is probably not eligible for MVP-1 Qwen review.
 Common causes:
 
 - hero workflow
-- Mercari platform
 - missing mapping issue
 - unresolved mapping finding
 
