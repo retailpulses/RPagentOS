@@ -114,7 +114,7 @@ export default function ListingAudit() {
       <section className="audit-detail mb-4">
         <div className="listing-filter-grid">
           <FilterSelect label="Platform" value={filters.platform ?? ''} options={options.platforms} onChange={value => updateFilter({ platform: value || undefined })} />
-          <FilterSelect label="Shop" value={filters.shopCode ?? ''} options={options.shops} onChange={value => updateFilter({ shopCode: value || undefined })} />
+          <FilterSelect label="Shop" value={filters.shopCode ?? ''} options={options.shops} formatOption={shopLabel} onChange={value => updateFilter({ shopCode: value || undefined })} />
           <FilterSelect label="Workflow" value={filters.workflowType ?? ''} options={options.workflowTypes} onChange={value => updateFilter({ workflowType: value || undefined })} />
           <FilterSelect label="Issue" value={filters.issueType ?? ''} options={options.issueTypes} onChange={value => updateFilter({ issueType: value || undefined })} />
           <FilterSelect label="Status" value={filters.status ?? ''} options={options.statuses} onChange={value => updateFilter({ status: value || undefined })} />
@@ -174,13 +174,19 @@ function SummaryMetric({ label, value, tone }: { label: string; value: number; t
   )
 }
 
-function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+function FilterSelect({ label, value, options, formatOption, onChange }: {
+  label: string
+  value: string
+  options: string[]
+  formatOption?: (value: string) => string
+  onChange: (value: string) => void
+}) {
   return (
     <div className="form-group">
       <label>{label}</label>
       <select value={value} onChange={event => onChange(event.target.value)}>
         <option value="">All</option>
-        {options.map(option => <option key={option} value={option}>{option}</option>)}
+        {options.map(option => <option key={option} value={option}>{formatOption ? formatOption(option) : option}</option>)}
       </select>
     </div>
   )
@@ -198,7 +204,7 @@ function WorkItemDetail({ item, busy, onIgnore, onWaitingInput, onCreateTask }: 
       <div className="flex justify-between gap-3 mb-4">
         <div>
           <h3>{targetLabel(item)}</h3>
-          <p className="text-xs text-muted">{item.platform ?? 'all platforms'} / {item.shop_code ?? 'all shops'} / {item.target_type}</p>
+          <p className="text-xs text-muted">{item.platform ?? 'all platforms'} / {shopLabel(item.shop_code)} / {item.target_type}</p>
         </div>
         <div className="audit-score">{Math.round(item.priority_score)}</div>
       </div>
@@ -262,6 +268,16 @@ function priorityTone(value: string) {
   return 'low'
 }
 
+function shopLabel(value: string | null | undefined) {
+  if (!value) return 'all shops'
+  const labels: Record<string, string> = {
+    homebliss: 'rakuten',
+    jp: 'amazon',
+    shop4: 'mercari shop4',
+  }
+  return labels[value] ?? value
+}
+
 function targetLabel(item: ListingWorkItem) {
   const context = item.source_context ?? {}
   return String(
@@ -298,7 +314,7 @@ function taskDescription(item: ListingWorkItem) {
     `Issue: ${item.issue_type ?? '-'}`,
     `Recommended action: ${item.recommended_action ?? '-'}`,
     `Platform: ${item.platform ?? '-'}`,
-    `Shop: ${item.shop_code ?? '-'}`,
+    `Shop: ${shopLabel(item.shop_code)}`,
     `Target: ${item.target_type} ${item.target_id}`,
     `Snapshot: ${item.source_snapshot_hash ?? '-'}`,
     '',
