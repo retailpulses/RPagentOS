@@ -35,7 +35,7 @@
     "qwen:bridge": "tsx --env-file=.env.local src/jobs/qwen-bridge.ts",
     "qwen:bridge:cloud": "tsx --env-file=.env.cloud.local src/jobs/qwen-bridge.ts",
     "job:quality:technical-review": "tsx --env-file=.env.cloud.local src/jobs/run-technical-review.ts",
-    "job:quality:seed-policies": "tsx --env-file=.env.local src/jobs/seed-review-policies.ts",
+    "job:quality:seed-policies": "tsx --env-file=.env.cloud.local src/jobs/seed-review-policies.ts",
     "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],

@@ -263,6 +263,8 @@ export interface ReviewRunOutput {
   snapshotImages: SnapshotImage[];
   result: ReviewResult;
   job: ReviewJob;
+  /** True when the snapshot was unchanged and already reviewed (skipped). */
+  skipped?: boolean;
 }
 
 // ─── Job Options ──────────────────────────────────────────────────────────────

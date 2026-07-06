@@ -28,10 +28,8 @@ export const defaultFetcher: ImageFetcher = {
         signal: controller.signal,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
+      // Always read the body (up to limit) so we can return status even on non-2xx.
+      // Non-OK responses may still contain useful image data or error pages.
       const contentLength = response.headers.get('content-length');
       if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) {
         throw new Error(`Image too large: ${contentLength} bytes (max ${MAX_IMAGE_BYTES})`);
@@ -40,6 +38,10 @@ export const defaultFetcher: ImageFetcher = {
       const arrayBuffer = await response.arrayBuffer();
       if (arrayBuffer.byteLength > MAX_IMAGE_BYTES) {
         throw new Error(`Image too large: ${arrayBuffer.byteLength} bytes (max ${MAX_IMAGE_BYTES})`);
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
       return {
@@ -102,17 +104,22 @@ export async function checkImageHealth(
       load_error: null,
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Extract HTTP status from fetch errors (e.g. "HTTP 404" → 404)
+    const statusMatch = message.match(/^HTTP (\d{3})/);
+    const httpStatus = statusMatch ? parseInt(statusMatch[1], 10) : null;
+
     return {
       image_index: imageIndex,
       image_url: imageUrl,
       loaded: false,
-      http_status: null,
+      http_status: httpStatus,
       width: null,
       height: null,
       byte_size: null,
       content_hash: null,
       url_hash: urlHash,
-      load_error: err instanceof Error ? err.message : String(err),
+      load_error: message,
     };
   }
 }

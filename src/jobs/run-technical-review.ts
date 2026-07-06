@@ -16,6 +16,7 @@
 
 import { supabase } from '../lib/supabase.js';
 import { runPolicyReview } from '../packages/listing-quality/review-runner.js';
+import type { PolicyReviewResult } from '../packages/listing-quality/review-runner.js';
 import type { ReviewPolicy, Marketplace, TechnicalReviewOptions } from '../packages/listing-quality/types.js';
 
 function parseArgs(): TechnicalReviewOptions & { policyId?: string } {
@@ -113,26 +114,44 @@ async function main(): Promise<void> {
   }
 
   // Run each policy
-  let totalReviewed = 0;
-  let totalErrors = 0;
+  let grandReviewed = 0;
+  let grandSkipped = 0;
+  let grandErrors = 0;
 
   for (const policy of policies) {
     if (options.verbose) {
       console.log(`\nRunning policy: ${policy.name}`);
     }
 
-    const results = await runPolicyReview(policy, options);
-    totalReviewed += results.length;
-    totalErrors += (results.length - results.filter(Boolean).length);
+    const result: PolicyReviewResult = await runPolicyReview(policy, options);
+    grandReviewed += result.reviewed;
+    grandSkipped += result.skipped;
+    grandErrors += result.errors;
 
-    if (options.verbose && results.length > 0) {
-      const scores = results.map((r) => r.result.final_score).filter((s): s is number => s !== null);
-      const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-      console.log(`  Results: ${results.length} reviewed, avg technical score: ${avgScore}`);
+    if (options.verbose && result.outputs.length > 0) {
+      const scores = result.outputs
+        .filter(o => !o.skipped && o.result?.final_score != null)
+        .map((o) => o.result.final_score as number);
+      const avgScore = scores.length > 0
+        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+        : 0;
+      console.log(
+        `  Reviewed: ${result.reviewed}, skipped: ${result.skipped}, ` +
+        `errors: ${result.errors}, avg technical score: ${avgScore}`,
+      );
     }
   }
 
-  console.log(`\n=== Done: ${totalReviewed} reviewed ===`);
+  console.log(
+    `\n=== Done: ${grandReviewed} reviewed, ${grandSkipped} skipped, ` +
+    `${grandErrors} errors ===`,
+  );
+
+  // Exit nonzero on unexpected failures so cron/monitoring can alert
+  if (grandErrors > 0) {
+    console.error(`ERROR: ${grandErrors} listing review(s) failed.`);
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

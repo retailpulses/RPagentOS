@@ -35,19 +35,75 @@ interface ListingRef {
   listing_status: string | null;
 }
 
+/**
+ * Get listing IDs that have at least one image row in platform_listing_images.
+ * Filters by an optional list of candidate listing IDs to avoid global scans.
+ * Paginates properly — no 1000-row truncation.
+ */
+async function getListingIdsWithImages(
+  candidateIds: string[] | null,
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const pageSize = 1000;
+  const effectiveCandidateIds = candidateIds ?? [];
+
+  if (effectiveCandidateIds.length === 0) {
+    // No candidates — query broadly but paginate
+    let offset = 0;
+    while (true) {
+      const { data } = await supabase
+        .from('platform_listing_images')
+        .select('listing_id')
+        .range(offset, offset + pageSize - 1)
+        .order('listing_id');
+
+      if (!data || data.length === 0) break;
+      for (const r of data) ids.add(r.listing_id as string);
+      if (data.length < pageSize) break;
+      offset += pageSize;
+    }
+    return ids;
+  }
+
+  // Query images filtered by candidate listing IDs, batched to avoid URL-length errors
+  const batchSize = 500;
+  for (let i = 0; i < effectiveCandidateIds.length; i += batchSize) {
+    const batch = effectiveCandidateIds.slice(i, i + batchSize);
+    let offset = 0;
+    while (true) {
+      const { data } = await supabase
+        .from('platform_listing_images')
+        .select('listing_id')
+        .in('listing_id', batch)
+        .range(offset, offset + pageSize - 1);
+
+      if (!data || data.length === 0) break;
+      for (const r of data) ids.add(r.listing_id as string);
+      if (data.length < pageSize) break;
+      offset += pageSize;
+    }
+  }
+
+  return ids;
+}
+
 async function selectListingsForPolicy(
   policy: ReviewPolicy,
   limit: number,
   platform?: Marketplace,
 ): Promise<ListingRef[]> {
+  const targetPlatform = platform ?? policy.marketplace;
+
+  // Base: platform filter
   let query = supabase
     .from('platform_listings')
     .select('id,platform,shop_code,product_spu_id,listing_status')
-    .eq('platform', platform ?? policy.marketplace);
+    .eq('platform', targetPlatform);
 
   switch (policy.scope_type) {
     case 'hero_products': {
-      // Hero products with listings
+      // Active hero product listings
+      query = query.eq('listing_status', 'active');
       const { data: heroSpus } = await supabase
         .from('merchandising_focus_items')
         .select('product_spu_id')
@@ -62,13 +118,19 @@ async function selectListingsForPolicy(
     }
     case 'active_with_images': {
       query = query.eq('listing_status', 'active');
-      // Only listings that have at least one image
-      const { data: withImages } = await supabase
-        .from('platform_listing_images')
-        .select('listing_id');
-      if (withImages && withImages.length > 0) {
-        const ids = [...new Set(withImages.map((r) => r.listing_id))];
-        query = query.in('id', ids.slice(0, 1000));
+      // Get active listing IDs first, then filter to those with images
+      const { data: activeListings } = await supabase
+        .from('platform_listings')
+        .select('id')
+        .eq('platform', targetPlatform)
+        .eq('listing_status', 'active');
+
+      const candidateIds = (activeListings ?? []).map((r) => r.id as string);
+      const idsWithImages = await getListingIdsWithImages(candidateIds);
+      if (idsWithImages.size > 0) {
+        query = query.in('id', [...idsWithImages]);
+      } else {
+        query = query.eq('id', '__none__'); // force empty
       }
       break;
     }
@@ -78,30 +140,39 @@ async function selectListingsForPolicy(
     }
     case 'curated':
     default: {
-      // Curated = hero products + active with images
+      // Curated = hero products + active with images.
+      // Apply BOTH hero SPU filter AND has-images filter.
+      query = query.eq('listing_status', 'active');
+
+      // Get hero SPU IDs
       const { data: heroSpus } = await supabase
         .from('merchandising_focus_items')
         .select('product_spu_id')
         .eq('focus_type', 'hero')
         .eq('status', 'active');
 
-      const conditions: string[] = [];
+      // Get candidate listing IDs to scope the image query
+      let candidateQuery = supabase
+        .from('platform_listings')
+        .select('id')
+        .eq('platform', targetPlatform)
+        .eq('listing_status', 'active');
 
       if (heroSpus && heroSpus.length > 0) {
         const spuIds = heroSpus.map((r) => r.product_spu_id);
-        conditions.push(`product_spu_id.in.(${spuIds.join(',')})`);
+        candidateQuery = candidateQuery.in('product_spu_id', spuIds);
+        // Apply hero SPU filter to the main query too
+        query = query.in('product_spu_id', spuIds);
       }
 
-      // Fetch once to get listing IDs with images
-      const { data: withImages } = await supabase
-        .from('platform_listing_images')
-        .select('listing_id');
+      const { data: candidateListings } = await candidateQuery;
+      const candidateIds = (candidateListings ?? []).map((r) => r.id as string);
+      const idsWithImages = await getListingIdsWithImages(candidateIds);
 
-      // Build as a simple active + has-images filter using PostgREST
-      query = query.eq('listing_status', 'active');
-      if (withImages && withImages.length > 0) {
-        const ids = [...new Set(withImages.map((r) => r.listing_id))].slice(0, 1000);
-        query = query.in('id', ids);
+      if (idsWithImages.size > 0) {
+        query = query.in('id', [...idsWithImages]);
+      } else {
+        query = query.eq('id', '__none__');
       }
       break;
     }
@@ -123,18 +194,19 @@ function generateTechnicalIssues(
 ): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
-  // Broken images
+  // Broken images — use is_main_image flag, not raw position
   const broken = snapshotImages.filter((img) => !img.loaded);
   if (broken.length > 0) {
+    const mainBroken = broken.some((img) => img.is_main_image);
     issues.push({
       type: 'broken_image_url',
-      severity: broken.some((img) => img.image_index === 0) ? 'critical' : 'high',
+      severity: mainBroken ? 'critical' : 'high',
       confidence: 1.0,
       source: 'technical',
       marketplace,
       affected_image_indexes: broken.map((img) => img.image_index),
       evidence: `${broken.length} image(s) failed to load: ${broken.map((img) => img.image_url).join(', ')}`,
-      operator_note: broken.some((img) => img.image_index === 0)
+      operator_note: mainBroken
         ? 'Main image is broken — listing may not display correctly.'
         : 'Some listing images failed to load.',
       requires_human_approval: false,
@@ -238,9 +310,28 @@ export async function runTechnicalReview(
   const marketplace = listingRef.platform as Marketplace;
 
   // 1. Capture snapshot (idempotent via source_hash)
-  const { snapshot, images: snapshotImages } = await captureSnapshot({
+  const { snapshot, images: snapshotImages, isExisting } = await captureSnapshot({
     listingId: listingRef.id,
   });
+
+  // 1b. If snapshot is unchanged and already has a completed result, skip.
+  if (isExisting) {
+    const { data: existingResult } = await supabase
+      .from('listing_review_results')
+      .select('id')
+      .eq('snapshot_id', snapshot.id)
+      .limit(1);
+
+    if (existingResult && existingResult.length > 0) {
+      return {
+        snapshot,
+        snapshotImages,
+        result: null as unknown as ReviewResult,
+        job: null as unknown as ReviewJob,
+        skipped: true,
+      } as ReviewRunOutput;
+    }
+  }
 
   // 2. Create job record
   const { data: jobRow, error: jobErr } = await supabase
@@ -407,20 +498,30 @@ export async function runTechnicalReview(
   }
 }
 
+export interface PolicyReviewResult {
+  outputs: ReviewRunOutput[];
+  reviewed: number;
+  skipped: number;
+  errors: number;
+}
+
 /**
  * Run technical review for all listings matching a policy.
+ * Returns detailed counts so the job runner can report and exit correctly.
  */
 export async function runPolicyReview(
   policy: ReviewPolicy,
   options: TechnicalReviewOptions,
-): Promise<ReviewRunOutput[]> {
+): Promise<PolicyReviewResult> {
   const listings = await selectListingsForPolicy(policy, options.limit, options.platform);
 
   if (options.verbose) {
     console.log(`Policy "${policy.name}": selected ${listings.length} listings`);
   }
 
-  const results: ReviewRunOutput[] = [];
+  const outputs: ReviewRunOutput[] = [];
+  let skipped = 0;
+  let errors = 0;
 
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i];
@@ -436,9 +537,14 @@ export async function runPolicyReview(
 
     try {
       const output = await runTechnicalReview(listing, policy);
-      results.push(output);
+      outputs.push(output);
 
-      if (options.verbose) {
+      if (output.skipped) {
+        skipped++;
+        if (options.verbose) {
+          console.log(`  Skipped: snapshot unchanged and already reviewed`);
+        }
+      } else if (options.verbose) {
         const imagesOk = output.snapshotImages.filter((img) => img.loaded).length;
         console.log(
           `  Done: ${imagesOk}/${output.snapshotImages.length} images loaded, ` +
@@ -446,9 +552,10 @@ export async function runPolicyReview(
         );
       }
     } catch (err) {
+      errors++;
       console.error(`  [${i + 1}/${listings.length}] Error reviewing ${listing.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return results;
+  return { outputs, reviewed: outputs.filter(o => !o.skipped).length, skipped, errors };
 }
