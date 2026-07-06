@@ -403,9 +403,24 @@ async function upsertProductAssets(
   const variantByItemCode = await buildLookup('product_variants', 'item_code', 'id');
   const spuByCode = await buildLookup('product_spus', 'spu_code', 'id');
 
-  let count = 0;
-  const batchSize = 500;
-  const allAssets: Array<Record<string, unknown>> = [];
+  // Collect all variant→URL pairs first, with dedup at SPU level.
+  // Key: `${spuId}::${assetUrl}`, Value: canonical asset row
+  const canonicalByKey = new Map<string, {
+    product_spu_id: string | null;
+    asset_url: string;
+    position: number;
+    raw_payload: Record<string, unknown>;
+  }>();
+
+  // Variant→image links to write after asset upsert
+  interface VariantLink {
+    spu_id: string | null;
+    asset_url: string;
+    variant_id: string | null;
+    item_code: string;
+    position: number;
+  }
+  const variantLinks: VariantLink[] = [];
 
   for (const r of rows) {
     const jsonStr = r['image_urls_json']?.trim();
@@ -424,46 +439,138 @@ async function upsertProductAssets(
     const variantId = variantByItemCode.get(itemCode) ?? null;
     const spuId = spuByCode.get(spu1) ?? null;
 
-    for (let pos = 0; pos < urls.length; pos++) {
-      const url = urls[pos];
+    const allUrls = [...urls];
+    const mainImg = r['product_main_image']?.trim();
+    if (mainImg && !allUrls.includes(mainImg)) {
+      allUrls.unshift(mainImg); // position 0
+    }
+
+    for (let pos = 0; pos < allUrls.length; pos++) {
+      const url = allUrls[pos];
       if (typeof url !== 'string' || !url.trim()) continue;
 
-      allAssets.push({
-        product_spu_id: spuId,
-        variant_id: variantId,
-        asset_type: 'image',
-        asset_url: url.trim(),
-        position: pos + 1,
-        source_system: 'product_master',
-        raw_payload: { source_row_item_code: itemCode },
-      });
-    }
+      const cleanUrl = url.trim();
+      const key = `${spuId ?? '__no_spu__'}::${cleanUrl}`;
 
-    // Also add Product Main Image if present and not already in JSON
-    const mainImg = r['product_main_image']?.trim();
-    if (mainImg && !urls.includes(mainImg)) {
-      allAssets.push({
-        product_spu_id: spuId,
+      // Level 1 dedup: one canonical row per (SPU, URL)
+      if (!canonicalByKey.has(key)) {
+        canonicalByKey.set(key, {
+          product_spu_id: spuId,
+          asset_url: cleanUrl,
+          position: pos === 0 && mainImg && !urls.includes(cleanUrl) ? 0 : pos + 1,
+          raw_payload: { source_row_item_code: itemCode },
+        });
+      }
+
+      // Always record variant→image link
+      variantLinks.push({
+        spu_id: spuId,
+        asset_url: cleanUrl,
         variant_id: variantId,
-        asset_type: 'image',
-        asset_url: mainImg,
-        position: 0,
-        source_system: 'product_master',
-        raw_payload: { source_row_item_code: itemCode, source_field: 'product_main_image' },
+        item_code: itemCode,
+        position: pos,
       });
     }
   }
 
-  // Insert in batches
-  for (let offset = 0; offset < allAssets.length; offset += batchSize) {
-    const batch = allAssets.slice(offset, offset + batchSize);
-    const { error } = await supabase.from('product_assets').insert(batch);
+  // Fetch existing assets for dedup against DB state
+  const spuIds = [...new Set(Array.from(canonicalByKey.values()).map(a => a.product_spu_id).filter(Boolean))];
+  const existingUrls = new Map<string, string>(); // key → asset_id
+  if (spuIds.length > 0) {
+    for (let i = 0; i < spuIds.length; i += 100) {
+      const batch = spuIds.slice(i, i + 100);
+      const { data } = await supabase
+        .from('product_assets')
+        .select('id, product_spu_id, asset_url')
+        .eq('asset_type', 'image')
+        .in('product_spu_id', batch);
 
-    if (!error) count += batch.length;
-    else console.error(`Assets batch ${offset}: ${error.message}`);
+      for (const row of (data ?? [])) {
+        const key = `${row.product_spu_id}::${row.asset_url}`;
+        existingUrls.set(key, row.id as string);
+      }
+    }
   }
 
-  return count;
+  // Upsert canonical assets (skip if already exists)
+  let assetCount = 0;
+  const assetIdByKey = new Map<string, string>(); // key → asset_id
+  const newAssets: Array<Record<string, unknown>> = [];
+
+  for (const [key, asset] of canonicalByKey) {
+    const existingId = existingUrls.get(key);
+    if (existingId) {
+      assetIdByKey.set(key, existingId);
+      continue;
+    }
+    // Don't double-insert within the batch
+    if (assetIdByKey.has(key)) continue;
+
+    newAssets.push({
+      product_spu_id: asset.product_spu_id,
+      asset_type: 'image',
+      asset_url: asset.asset_url,
+      position: asset.position,
+      source_system: 'product_master',
+      raw_payload: asset.raw_payload,
+    });
+    assetIdByKey.set(key, '__pending__'); // placeholder
+  }
+
+  // Insert new assets in batches
+  if (newAssets.length > 0) {
+    const batchSize = 500;
+    for (let offset = 0; offset < newAssets.length; offset += batchSize) {
+      const batch = newAssets.slice(offset, offset + batchSize);
+      const { data, error } = await supabase.from('product_assets').insert(batch).select('id, product_spu_id, asset_url');
+
+      if (error) {
+        console.error(`Assets insert batch ${offset}: ${error.message}`);
+      } else {
+        assetCount += (data ?? []).length;
+        for (const row of (data ?? [])) {
+          const key = `${row.product_spu_id}::${row.asset_url}`;
+          assetIdByKey.set(key, row.id as string);
+        }
+      }
+    }
+  }
+
+  // Upsert variant→image links into junction table
+  const linksToInsert: Array<Record<string, unknown>> = [];
+  for (const link of variantLinks) {
+    const key = `${link.spu_id ?? '__no_spu__'}::${link.asset_url}`;
+    const imageId = assetIdByKey.get(key);
+    if (!imageId || imageId === '__pending__') continue; // skip if asset insert failed
+
+    linksToInsert.push({
+      image_id: imageId,
+      product_spu_id: link.spu_id,
+      variant_id: link.variant_id,
+      item_code: link.item_code,
+      position: link.position,
+    });
+  }
+
+  if (linksToInsert.length > 0) {
+    let linkCount = 0;
+    const linkBatchSize = 500;
+    for (let offset = 0; offset < linksToInsert.length; offset += linkBatchSize) {
+      const batch = linksToInsert.slice(offset, offset + linkBatchSize);
+      const { error } = await supabase
+        .from('product_image_links')
+        .upsert(batch, { onConflict: 'image_id,variant_id,position', ignoreDuplicates: true });
+
+      if (error) {
+        console.error(`Image links batch ${offset}: ${error.message}`);
+      } else {
+        linkCount += batch.length;
+      }
+    }
+    console.log(`  Image links: ${linkCount} upserted`);
+  }
+
+  return assetCount;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────
