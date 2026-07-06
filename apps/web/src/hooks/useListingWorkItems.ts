@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase'
 
 const DEFAULT_PAGE_SIZE = 200
 const MISSING_SUPABASE_MESSAGE = 'Listing workbench is not connected. Configure Supabase for this deployment.'
-const QWEN_BRIDGE_URL = import.meta.env.VITE_QWEN_BRIDGE_URL || 'http://127.0.0.1:8788'
 
 export interface ListingWorkItem {
   id: string
@@ -301,18 +300,23 @@ export function useRunQwenReview() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const run = async (workItemId: string, force = false): Promise<{ ok: boolean; error?: string }> => {
+  const run = async (workItemId: string, force = false): Promise<{ ok: boolean; error?: string; requestId?: string }> => {
+    if (!supabase) {
+      setError(MISSING_SUPABASE_MESSAGE)
+      return { ok: false, error: MISSING_SUPABASE_MESSAGE }
+    }
+
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(`${QWEN_BRIDGE_URL}/reviews`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ work_item_id: workItemId, force }),
-      })
-      const body = await response.json().catch(() => ({})) as { error?: string }
-      if (!response.ok) throw new Error(body.error ?? `Qwen bridge returned ${response.status}`)
-      return { ok: true }
+      const { data, error: insertError } = await supabase
+        .from('listing_qwen_review_requests')
+        .insert({ work_item_id: workItemId, force, requested_by: 'listing_workbench' })
+        .select('id')
+        .single()
+
+      if (insertError) throw insertError
+      return { ok: true, requestId: (data as { id: string }).id }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Failed to run Qwen review'
       setError(message)

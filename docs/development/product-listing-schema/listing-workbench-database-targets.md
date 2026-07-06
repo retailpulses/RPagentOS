@@ -54,6 +54,8 @@ Local job verification must still use the `SUPABASE_URL` from `.env.local`.
 
 The deployed `/listing` page is static Cloudflare Pages, but MVP-1 Qwen runs through local Ollama. To let the live page run Qwen safely, start the local bridge against the same database target the page is showing.
 
+The browser inserts rows into `listing_qwen_review_requests` with the anon key. The local bridge polls that table with the service-role key, calls Ollama, and writes `listing_qwen_reviews`.
+
 For local Supabase:
 
 ```bash
@@ -74,4 +76,4 @@ Then run:
 npm run qwen:bridge:cloud
 ```
 
-The bridge listens on `http://127.0.0.1:8788`. The browser uses the anon key only; Qwen writes stay inside the local bridge process through the service-role key. Do not expose the bridge publicly.
+The bridge also exposes `http://127.0.0.1:8788/health` for local checks, but the live workbench does not need to call localhost directly. The browser uses the anon key only; Qwen writes stay inside the local bridge process through the service-role key. Do not expose the bridge publicly.

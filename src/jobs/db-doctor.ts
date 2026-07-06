@@ -25,6 +25,7 @@ const REQUIRED_RELATIONS: Array<Pick<RelationCheck, 'name' | 'requiredFor'>> = [
   { name: 'listing_intelligence_runs', requiredFor: 'qwen' },
   { name: 'listing_intelligence_results', requiredFor: 'qwen' },
   { name: 'listing_qwen_reviews', requiredFor: 'qwen' },
+  { name: 'listing_qwen_review_requests', requiredFor: 'qwen' },
 ];
 
 const url = process.env['SUPABASE_URL'];

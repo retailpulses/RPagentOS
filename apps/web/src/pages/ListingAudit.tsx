@@ -105,6 +105,8 @@ export default function ListingAudit() {
       return
     }
     await qwenReview.refetch()
+    window.setTimeout(() => { void qwenReview.refetch() }, 3000)
+    window.setTimeout(() => { void qwenReview.refetch() }, 10000)
   }
 
   return (

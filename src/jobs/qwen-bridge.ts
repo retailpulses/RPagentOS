@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { runQwenReviewForWorkItem } from '../packages/listing-intelligence/qwen-review.js';
+import { supabase } from '../lib/supabase.js';
 
 const port = Number(process.env['LISTING_QWEN_BRIDGE_PORT'] ?? 8788);
+const pollMs = Number(process.env['LISTING_QWEN_BRIDGE_POLL_MS'] ?? 2500);
 const allowedOrigins = new Set([
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
@@ -18,6 +20,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, origin?: s
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Content-Type', 'application/json');
   res.writeHead(status);
   res.end(JSON.stringify(body));
@@ -72,6 +75,79 @@ const server = createServer(async (req, res) => {
   }
 });
 
+interface QwenRequestRow {
+  id: string;
+  work_item_id: string;
+  force: boolean;
+  llm_model: string | null;
+}
+
+let polling = false;
+
+async function processQueuedRequests(): Promise<void> {
+  if (polling) return;
+  polling = true;
+  try {
+    const { data, error } = await supabase
+      .from('listing_qwen_review_requests')
+      .select('id,work_item_id,force,llm_model')
+      .eq('status', 'queued')
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (error) throw new Error(`Poll Qwen requests: ${error.message}`);
+    const request = data?.[0] as QwenRequestRow | undefined;
+    if (!request) return;
+
+    const now = new Date().toISOString();
+    const { error: claimError } = await supabase
+      .from('listing_qwen_review_requests')
+      .update({ status: 'running', updated_at: now })
+      .eq('id', request.id)
+      .eq('status', 'queued');
+
+    if (claimError) throw new Error(`Claim Qwen request: ${claimError.message}`);
+
+    try {
+      const result = await runQwenReviewForWorkItem(request.work_item_id, {
+        force: request.force,
+        model: request.llm_model ?? undefined,
+      });
+      await supabase
+        .from('listing_qwen_review_requests')
+        .update({
+          status: 'completed',
+          review_id: result.review_id,
+          error_message: null,
+          updated_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', request.id);
+      console.log(`Qwen request ${request.id} completed with review ${result.review_id}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Qwen request failed';
+      await supabase
+        .from('listing_qwen_review_requests')
+        .update({
+          status: 'failed',
+          error_message: message,
+          updated_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', request.id);
+      console.error(`Qwen request ${request.id} failed: ${message}`);
+    }
+  } finally {
+    polling = false;
+  }
+}
+
 server.listen(port, '127.0.0.1', () => {
   console.log(`Listing Qwen bridge listening on http://127.0.0.1:${port}`);
+  console.log(`Polling listing_qwen_review_requests every ${pollMs}ms`);
+  setInterval(() => {
+    void processQueuedRequests().catch((error) => {
+      console.error(error instanceof Error ? error.message : error);
+    });
+  }, pollMs);
 });
