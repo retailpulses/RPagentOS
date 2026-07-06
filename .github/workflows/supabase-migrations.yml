@@ -1,0 +1,61 @@
+name: Deploy Supabase Migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print pending migrations without applying them"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: Supabase migration deploy
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate migration secrets
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_REF"
+          test -n "$SUPABASE_DB_PASSWORD"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link exact Supabase project
+        run: |
+          supabase link \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD" \
+            --yes
+
+      - name: Show migration history
+        run: supabase migration list --linked --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Dry-run migration push
+        if: ${{ inputs.dry_run == 'true' }}
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --dry-run
+
+      - name: Apply migrations
+        if: ${{ inputs.dry_run == 'false' }}
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Verify no pending migrations
+        if: ${{ inputs.dry_run == 'false' }}
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --dry-run

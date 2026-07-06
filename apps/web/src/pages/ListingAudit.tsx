@@ -1,179 +1,171 @@
 import { useMemo, useState } from 'react'
 import {
-  auditListings,
-  parseListingAuditFile,
-  type ListingAuditActionType,
-  type ListingAuditPriority,
-  type ListingAuditResult,
-} from '@packages/listing-audit'
+  type ListingWorkItem,
+  type ListingWorkItemFilters,
+  useListingWorkItemOptions,
+  useListingWorkItems,
+  useUpdateListingWorkItemStatus,
+} from '../hooks/useListingWorkItems'
+import { useCreateTask, useLinkTarget } from '../hooks/useTasks'
 
-const SAMPLE_CSV = `external_listing_id,platform,shop_code,sku,listing_title,description,current_price,stock_qty,listing_status,category,image_urls
-csv-listing-001,mercari,shop4,SKU-CAT-001,猫ベッド グレー M,"ふわふわ素材の猫用ベッドです。サイズ M、カラー グレー。新品、送料込みで発送します。底面は滑りにくい仕様です。",2490,12,active,ペット用品,https://example.com/cat-bed-main.jpg|https://example.com/cat-bed-detail.jpg
-csv-listing-002,mercari,shop4,SKU-DOG-002,犬服,"かわいい犬服です。",199,5,active,ペット用品,`
-
-const ACTION_LABELS: Record<ListingAuditActionType, string> = {
-  no_action: 'No Action',
-  rewrite: 'Rewrite',
-  manual_review: 'Manual Review',
-  price_check: 'Price Check',
-  image_fix: 'Image Fix',
-}
-
-const PRIORITY_LABELS: Record<ListingAuditPriority, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-}
-
-const ACTION_OPTIONS: Array<ListingAuditActionType | 'all'> = [
-  'all',
-  'price_check',
-  'rewrite',
-  'image_fix',
-  'manual_review',
-  'no_action',
-]
+const EMPTY_FILTERS: ListingWorkItemFilters = {}
 
 export default function ListingAudit() {
-  const [sourceName, setSourceName] = useState('pasted-listings.csv')
-  const [input, setInput] = useState(SAMPLE_CSV)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedAction, setSelectedAction] = useState<ListingAuditActionType | 'all'>('all')
-  const [selectedListingId, setSelectedListingId] = useState<string | null>(null)
-  const [results, setResults] = useState<ListingAuditResult[]>(() => {
-    return auditListings(parseListingAuditFile(SAMPLE_CSV, 'sample.csv')).results
-  })
+  const [filters, setFilters] = useState<ListingWorkItemFilters>(EMPTY_FILTERS)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const filteredResults = useMemo(() => {
-    if (selectedAction === 'all') return results
-    return results.filter(result => result.actionRecommendation.type === selectedAction)
-  }, [results, selectedAction])
+  const { data, loading, error, refetch } = useListingWorkItems(filters)
+  const options = useListingWorkItemOptions(data)
+  const statusUpdate = useUpdateListingWorkItemStatus()
+  const createTask = useCreateTask()
+  const linkTarget = useLinkTarget()
 
-  const selectedResult = useMemo(() => {
-    return filteredResults.find(result => result.listingId === selectedListingId) ?? filteredResults[0] ?? null
-  }, [filteredResults, selectedListingId])
+  const selected = useMemo(() => {
+    return data.find(item => item.id === selectedId) ?? data[0] ?? null
+  }, [data, selectedId])
 
-  const summary = useMemo(() => auditListings(results.map(result => result.sourceSnapshot)).summary, [results])
-
-  const runAudit = (content = input, fileName = sourceName) => {
-    try {
-      const parsed = parseListingAuditFile(content, fileName)
-      const batch = auditListings(parsed)
-      setResults(batch.results)
-      setSelectedListingId(batch.results[0]?.listingId ?? null)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+  const summary = useMemo(() => {
+    return {
+      total: data.length,
+      open: data.filter(item => item.status === 'open').length,
+      high: data.filter(item => item.issue_severity === 'high' || item.issue_severity === 'critical').length,
+      hero: data.filter(item => item.is_hero).length,
     }
+  }, [data])
+
+  const updateFilter = (patch: Partial<ListingWorkItemFilters>) => {
+    setSelectedId(null)
+    setFilters(current => ({ ...current, ...patch }))
   }
 
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return
-    const content = await file.text()
-    setSourceName(file.name)
-    setInput(content)
-    runAudit(content, file.name)
+  const handleStatus = async (item: ListingWorkItem, status: string) => {
+    setActionError(null)
+    const updated = await statusUpdate.update(item.id, status)
+    if (!updated && statusUpdate.error) setActionError(statusUpdate.error)
+    await refetch()
+    setSelectedId(item.id)
+  }
+
+  const handleCreateTask = async (item: ListingWorkItem) => {
+    setActionError(null)
+    const title = taskTitle(item)
+    const description = taskDescription(item)
+    const task = await createTask.create({
+      title,
+      description,
+      task_type: taskTypeFor(item),
+      priority: priorityFor(item),
+      platform: item.platform ?? undefined,
+      shop_code: item.shop_code ?? undefined,
+      source: 'system',
+      owner_type: 'human',
+      owner_key: 'jim',
+      execution_brief: description,
+      metadata: {
+        source: 'listing_intelligence_workbench',
+        work_item_id: item.id,
+        workflow_type: item.workflow_type,
+        issue_type: item.issue_type,
+        recommended_action: item.recommended_action,
+        source_snapshot_hash: item.source_snapshot_hash,
+      },
+    })
+
+    if (!task) {
+      setActionError(createTask.error ?? 'Failed to create task')
+      return
+    }
+
+    const linked = await linkTarget.link(task.id, {
+      target_type: item.target_type,
+      target_id: item.target_id,
+      target_label: targetLabel(item),
+      target_ref_json: taskTargetPayload(item),
+    })
+
+    if (!linked) {
+      setActionError(linkTarget.error ?? 'Task created but target link failed')
+      return
+    }
+
+    await handleStatus(item, 'task_created')
   }
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h2>Listing Audit</h2>
-          <p className="text-sm text-muted mt-2">Review local listing exports before creating operator tasks.</p>
+          <h2>Listing Intelligence</h2>
+          <p className="text-sm text-muted mt-2">Supabase-backed listing work queue for MVP-0.</p>
         </div>
-        <div className="flex gap-2">
-          <label className="btn">
-            Upload CSV/JSON
-            <input
-              className="hidden-file-input"
-              type="file"
-              accept=".csv,.json,application/json,text/csv"
-              onChange={event => void handleFile(event.target.files?.[0])}
-            />
-          </label>
-          <button className="btn btn-primary" onClick={() => runAudit()}>
-            Run Audit
-          </button>
-        </div>
+        <button className="btn" onClick={() => void refetch()} disabled={loading}>
+          Refresh
+        </button>
       </div>
 
-      <div className="audit-shell">
-        <section className="audit-input-panel">
-          <div className="flex justify-between items-center mb-3">
-            <div>
-              <h3>Input</h3>
-              <p className="text-xs text-muted">{sourceName}</p>
-            </div>
-            <button className="btn btn-sm" onClick={() => {
-              setSourceName('pasted-listings.csv')
-              setInput(SAMPLE_CSV)
-              runAudit(SAMPLE_CSV, 'sample.csv')
-            }}>
-              Reset Sample
+      <div className="audit-summary-grid">
+        <SummaryMetric label="Work Items" value={summary.total} />
+        <SummaryMetric label="Open" value={summary.open} />
+        <SummaryMetric label="High" value={summary.high} tone="high" />
+        <SummaryMetric label="Hero" value={summary.hero} tone="medium" />
+      </div>
+
+      <section className="audit-detail mb-4">
+        <div className="listing-filter-grid">
+          <FilterSelect label="Platform" value={filters.platform ?? ''} options={options.platforms} onChange={value => updateFilter({ platform: value || undefined })} />
+          <FilterSelect label="Shop" value={filters.shopCode ?? ''} options={options.shops} onChange={value => updateFilter({ shopCode: value || undefined })} />
+          <FilterSelect label="Workflow" value={filters.workflowType ?? ''} options={options.workflowTypes} onChange={value => updateFilter({ workflowType: value || undefined })} />
+          <FilterSelect label="Issue" value={filters.issueType ?? ''} options={options.issueTypes} onChange={value => updateFilter({ issueType: value || undefined })} />
+          <FilterSelect label="Status" value={filters.status ?? ''} options={options.statuses} onChange={value => updateFilter({ status: value || undefined })} />
+          <div className="form-group">
+            <label>Search</label>
+            <input value={filters.search ?? ''} onChange={event => updateFilter({ search: event.target.value || undefined })} />
+          </div>
+          <label className="listing-checkbox">
+            <input type="checkbox" checked={Boolean(filters.heroOnly)} onChange={event => updateFilter({ heroOnly: event.target.checked || undefined })} />
+            Hero only
+          </label>
+        </div>
+      </section>
+
+      {error && <p className="audit-error mb-4">{error}</p>}
+      {actionError && <p className="audit-error mb-4">{actionError}</p>}
+
+      <div className="audit-results-layout">
+        <section className="audit-result-list">
+          {loading && <p className="text-sm text-muted">Loading...</p>}
+          {!loading && data.length === 0 && <p className="text-sm text-muted">No work items found.</p>}
+          {data.map(item => (
+            <button
+              key={item.id}
+              className={`audit-result-row ${selected?.id === item.id ? 'active' : ''}`}
+              onClick={() => setSelectedId(item.id)}
+            >
+              <span>
+                <strong>{targetLabel(item)}</strong>
+                <small>{item.workflow_type} / {item.issue_type ?? 'strategy'} / {item.status}</small>
+              </span>
+              <span className={`audit-priority ${priorityTone(item.issue_severity)}`}>{item.issue_severity}</span>
             </button>
-          </div>
-          <textarea
-            className="audit-input"
-            value={input}
-            spellCheck={false}
-            onChange={event => setInput(event.target.value)}
+          ))}
+        </section>
+
+        {selected && (
+          <WorkItemDetail
+            item={selected}
+            busy={statusUpdate.loading || createTask.loading || linkTarget.loading}
+            onIgnore={() => void handleStatus(selected, 'ignored')}
+            onWaitingInput={() => void handleStatus(selected, 'waiting_for_input')}
+            onCreateTask={() => void handleCreateTask(selected)}
           />
-          {error && <p className="audit-error mt-3">{error}</p>}
-        </section>
-
-        <section className="audit-review-panel">
-          <div className="audit-summary-grid">
-            <SummaryMetric label="Listings" value={summary.total} />
-            <SummaryMetric label="Avg Score" value={summary.averageScore} />
-            <SummaryMetric label="High" value={summary.priorityCounts.high} tone="high" />
-            <SummaryMetric label="Medium" value={summary.priorityCounts.medium} tone="medium" />
-          </div>
-
-          <div className="audit-toolbar">
-            {ACTION_OPTIONS.map(action => (
-              <button
-                key={action}
-                className={`audit-filter ${selectedAction === action ? 'active' : ''}`}
-                onClick={() => {
-                  setSelectedAction(action)
-                  setSelectedListingId(null)
-                }}
-              >
-                {action === 'all' ? 'All' : ACTION_LABELS[action]}
-              </button>
-            ))}
-          </div>
-
-          <div className="audit-results-layout">
-            <div className="audit-result-list">
-              {filteredResults.map(result => (
-                <button
-                  key={result.listingId}
-                  className={`audit-result-row ${selectedResult?.listingId === result.listingId ? 'active' : ''}`}
-                  onClick={() => setSelectedListingId(result.listingId)}
-                >
-                  <span>
-                    <strong>{result.sourceSnapshot.title || result.listingId}</strong>
-                    <small>{result.sku ?? result.listingId}</small>
-                  </span>
-                  <span className={`audit-priority ${result.actionRecommendation.priority}`}>
-                    {PRIORITY_LABELS[result.actionRecommendation.priority]}
-                  </span>
-                </button>
-              ))}
-              {filteredResults.length === 0 && <p className="text-sm text-muted">No listings match this filter.</p>}
-            </div>
-
-            {selectedResult && <AuditDetail result={selectedResult} />}
-          </div>
-        </section>
+        )}
       </div>
     </div>
   )
 }
 
-function SummaryMetric({ label, value, tone }: { label: string; value: number; tone?: ListingAuditPriority }) {
+function SummaryMetric({ label, value, tone }: { label: string; value: number; tone?: 'high' | 'medium' }) {
   return (
     <div className={`audit-metric ${tone ?? ''}`}>
       <span>{label}</span>
@@ -182,48 +174,153 @@ function SummaryMetric({ label, value, tone }: { label: string; value: number; t
   )
 }
 
-function AuditDetail({ result }: { result: ListingAuditResult }) {
+function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  return (
+    <div className="form-group">
+      <label>{label}</label>
+      <select value={value} onChange={event => onChange(event.target.value)}>
+        <option value="">All</option>
+        {options.map(option => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function WorkItemDetail({ item, busy, onIgnore, onWaitingInput, onCreateTask }: {
+  item: ListingWorkItem
+  busy: boolean
+  onIgnore: () => void
+  onWaitingInput: () => void
+  onCreateTask: () => void
+}) {
   return (
     <article className="audit-detail">
       <div className="flex justify-between gap-3 mb-4">
         <div>
-          <h3>{result.sourceSnapshot.title || result.listingId}</h3>
-          <p className="text-xs text-muted">{result.platform} / {result.shopCode ?? 'unknown shop'} / {result.sku ?? 'no sku'}</p>
+          <h3>{targetLabel(item)}</h3>
+          <p className="text-xs text-muted">{item.platform ?? 'all platforms'} / {item.shop_code ?? 'all shops'} / {item.target_type}</p>
         </div>
-        <div className="audit-score">{result.overallScore}</div>
+        <div className="audit-score">{Math.round(item.priority_score)}</div>
       </div>
 
       <div className="audit-recommendation mb-4">
-        <span className={`audit-priority ${result.actionRecommendation.priority}`}>
-          {PRIORITY_LABELS[result.actionRecommendation.priority]}
-        </span>
-        <strong>{ACTION_LABELS[result.actionRecommendation.type]}</strong>
-        <p>{result.actionRecommendation.reason}</p>
+        <span className={`audit-priority ${priorityTone(item.issue_severity)}`}>{item.issue_severity}</span>
+        <strong>{item.recommended_action ?? item.workflow_type}</strong>
+        <p>{item.workflow_type} / {item.issue_type ?? 'strategy'} / {item.human_input_level}</p>
       </div>
 
-      <IssueBlock title="Title" score={result.titleQuality.score} issues={result.titleQuality.issues} suggestion={result.titleQuality.suggestedTitle} />
-      <IssueBlock title="Description" score={result.descriptionQuality.score} issues={result.descriptionQuality.issues} suggestion={result.descriptionQuality.suggestedDescription} />
-      <IssueBlock title="Images" score={result.imageQuality.score} issues={result.imageQuality.issues} />
-      <IssueBlock title="Pricing" score={result.pricingRisk.level === 'low' ? 100 : result.pricingRisk.level === 'medium' ? 70 : 35} issues={[result.pricingRisk.reason]} />
+      <div className="audit-toolbar">
+        <button className="btn" disabled={busy} onClick={onIgnore}>Ignore</button>
+        <button className="btn" disabled={busy} onClick={onWaitingInput}>Mark Waiting Input</button>
+        <button className="btn btn-primary" disabled={busy} onClick={onCreateTask}>Create Task</button>
+        <button className="btn" disabled>Run Qwen Review</button>
+      </div>
+
+      <IssueBlock title="Trace" rows={[
+        ['Family', item.product_family_id],
+        ['SPU', item.product_spu_id],
+        ['Variant', item.variant_id],
+        ['Listing', item.listing_id],
+        ['Listing SKU', item.listing_sku_id],
+        ['Snapshot', item.source_snapshot_hash ? `${item.source_snapshot_hash.slice(0, 12)} / v${item.source_snapshot_version}` : `v${item.source_snapshot_version}`],
+      ]} />
+      <JsonBlock title="Classification Reasons" value={item.classification_reasons} />
+      <JsonBlock title="Deterministic Findings" value={item.deterministic_findings} />
+      <JsonBlock title="Source Context" value={item.source_context} />
     </article>
   )
 }
 
-function IssueBlock({ title, score, issues, suggestion }: { title: string; score: number; issues: string[]; suggestion?: string }) {
+function IssueBlock({ title, rows }: { title: string; rows: Array<[string, string | null]> }) {
   return (
     <section className="audit-issue-block">
-      <div className="flex justify-between items-center">
-        <h4>{title}</h4>
-        <span>{score}</span>
-      </div>
-      {issues.length > 0 ? (
-        <ul>
-          {issues.map(issue => <li key={issue}>{issue}</li>)}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted">No issue found.</p>
-      )}
-      {suggestion && <pre>{suggestion}</pre>}
+      <h4>{title}</h4>
+      <dl className="listing-trace">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value ?? '-'}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   )
+}
+
+function JsonBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <section className="audit-issue-block">
+      <h4>{title}</h4>
+      <pre>{JSON.stringify(value, null, 2)}</pre>
+    </section>
+  )
+}
+
+function priorityTone(value: string) {
+  if (value === 'critical' || value === 'high') return 'high'
+  if (value === 'medium') return 'medium'
+  return 'low'
+}
+
+function targetLabel(item: ListingWorkItem) {
+  const context = item.source_context ?? {}
+  return String(
+    context['title']
+    ?? context['spu_code']
+    ?? context['seller_sku']
+    ?? context['external_listing_id']
+    ?? item.target_key
+  )
+}
+
+function priorityFor(item: ListingWorkItem) {
+  if (item.issue_severity === 'critical') return 'urgent'
+  if (item.issue_severity === 'high') return 'high'
+  if (item.issue_severity === 'low') return 'low'
+  return 'medium'
+}
+
+function taskTypeFor(item: ListingWorkItem) {
+  if (item.issue_type === 'missing_images') return 'listing_image_update'
+  if (item.issue_type === 'missing_mapping') return 'product_mapping_review'
+  if (item.issue_type === 'price_missing' || item.issue_type === 'price_stock_mismatch') return 'pricing_review'
+  if (item.workflow_type === 'optimize_hero_listing') return 'hero_listing_strategy'
+  return 'listing_content_update'
+}
+
+function taskTitle(item: ListingWorkItem) {
+  return `[${item.workflow_type}] ${targetLabel(item)}`.slice(0, 180)
+}
+
+function taskDescription(item: ListingWorkItem) {
+  return [
+    `Workflow: ${item.workflow_type}`,
+    `Issue: ${item.issue_type ?? '-'}`,
+    `Recommended action: ${item.recommended_action ?? '-'}`,
+    `Platform: ${item.platform ?? '-'}`,
+    `Shop: ${item.shop_code ?? '-'}`,
+    `Target: ${item.target_type} ${item.target_id}`,
+    `Snapshot: ${item.source_snapshot_hash ?? '-'}`,
+    '',
+    'Classification reasons:',
+    JSON.stringify(item.classification_reasons, null, 2),
+  ].join('\n')
+}
+
+function taskTargetPayload(item: ListingWorkItem) {
+  return {
+    work_item_id: item.id,
+    workflow_type: item.workflow_type,
+    issue_type: item.issue_type,
+    recommended_action: item.recommended_action,
+    platform: item.platform,
+    shop_code: item.shop_code,
+    product_family_id: item.product_family_id,
+    product_spu_id: item.product_spu_id,
+    variant_id: item.variant_id,
+    bundle_id: item.bundle_id,
+    listing_id: item.listing_id,
+    listing_sku_id: item.listing_sku_id,
+    source_snapshot_hash: item.source_snapshot_hash,
+  }
 }

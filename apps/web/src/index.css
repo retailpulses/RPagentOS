@@ -334,6 +334,48 @@ input, textarea, select {
   margin-bottom: 1rem;
 }
 
+.listing-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.listing-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 36px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.listing-checkbox input {
+  width: auto;
+}
+
+.listing-trace {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.24fr) minmax(0, 0.76fr);
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.listing-trace div {
+  display: contents;
+}
+
+.listing-trace dt {
+  color: var(--color-text-muted);
+}
+
+.listing-trace dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .audit-filter {
   min-height: 34px;
   padding: 0.35rem 0.7rem;
@@ -491,7 +533,8 @@ input, textarea, select {
 
 @media (max-width: 1100px) {
   .audit-shell,
-  .audit-results-layout {
+  .audit-results-layout,
+  .listing-filter-grid {
     grid-template-columns: 1fr;
   }
 

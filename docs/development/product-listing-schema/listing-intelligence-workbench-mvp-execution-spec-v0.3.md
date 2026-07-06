@@ -4,6 +4,8 @@ Date: 2026-07-06
 Status: Execution-ready spec for development review
 Parent architecture: `listing-intelligence-workbench-mvp-design.md`
 
+Database target safety: `listing-workbench-database-targets.md`
+
 ## Version Change Log
 
 | Version | Date | Changes |

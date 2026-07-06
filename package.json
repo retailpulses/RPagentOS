@@ -7,6 +7,7 @@
     "test:supabase": "tsx --env-file=.env.local src/test-supabase.ts",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
+    "db:doctor": "tsx --env-file=.env.local src/jobs/db-doctor.ts",
     "db:status": "supabase status",
     "job:generate-candidates": "tsx --env-file=.env.local src/jobs/generate-promotion-candidates.ts",
     "job:mock-decision": "tsx --env-file=.env.local src/jobs/run-agent-decision-mock.ts",
@@ -27,6 +28,8 @@
     "import:amazon": "tsx --env-file=.env.local src/jobs/import-amazon.ts",
     "import:resolve-links": "tsx --env-file=.env.local src/jobs/resolve-links.ts",
     "import:validate": "tsx --env-file=.env.local src/jobs/validate-imports.ts",
+    "import:hero-products": "tsx --env-file=.env.local src/jobs/import-hero-products.ts",
+    "job:listing:classify": "tsx --env-file=.env.local src/jobs/classify-listing-targets.ts",
     "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],
