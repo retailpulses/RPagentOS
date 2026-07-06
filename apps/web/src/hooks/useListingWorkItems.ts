@@ -129,19 +129,74 @@ export function useListingWorkItems(filters: ListingWorkItemFilters = {}) {
   return { data, loading, error, refetch: fetch }
 }
 
-export function useListingWorkItemOptions(items: ListingWorkItem[]) {
-  return useMemo(() => {
-    const collect = (getter: (item: ListingWorkItem) => string | null | undefined) => {
-      return Array.from(new Set(items.map(getter).filter(Boolean) as string[])).sort()
+interface ListingWorkItemOptionRow {
+  platform: string | null
+  shop_code: string | null
+  workflow_type: string
+  issue_type: string | null
+  status: string
+}
+
+const EMPTY_OPTIONS = {
+  platforms: [] as string[],
+  shops: [] as string[],
+  workflowTypes: [] as string[],
+  issueTypes: [] as string[],
+  statuses: [] as string[],
+}
+
+export function useListingWorkItemOptions() {
+  const [options, setOptions] = useState(EMPTY_OPTIONS)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchOptions() {
+      if (!supabase) {
+        setOptions(EMPTY_OPTIONS)
+        return
+      }
+
+      const rows: ListingWorkItemOptionRow[] = []
+      let from = 0
+
+      while (!cancelled) {
+        const { data, error } = await supabase
+          .from('listing_work_items')
+          .select('platform, shop_code, workflow_type, issue_type, status')
+          .range(from, from + 999)
+
+        if (error) throw error
+        rows.push(...((data ?? []) as ListingWorkItemOptionRow[]))
+        if (!data || data.length < 1000) break
+        from += 1000
+      }
+
+      if (cancelled) return
+
+      const collect = (getter: (item: ListingWorkItemOptionRow) => string | null | undefined) => {
+        return Array.from(new Set(rows.map(getter).filter(Boolean) as string[])).sort()
+      }
+
+      setOptions({
+        platforms: collect(item => item.platform),
+        shops: collect(item => item.shop_code),
+        workflowTypes: collect(item => item.workflow_type),
+        issueTypes: collect(item => item.issue_type),
+        statuses: collect(item => item.status),
+      })
     }
-    return {
-      platforms: collect(item => item.platform),
-      shops: collect(item => item.shop_code),
-      workflowTypes: collect(item => item.workflow_type),
-      issueTypes: collect(item => item.issue_type),
-      statuses: collect(item => item.status),
+
+    void fetchOptions().catch(() => {
+      if (!cancelled) setOptions(EMPTY_OPTIONS)
+    })
+
+    return () => {
+      cancelled = true
     }
-  }, [items])
+  }, [])
+
+  return options
 }
 
 export function useUpdateListingWorkItemStatus() {

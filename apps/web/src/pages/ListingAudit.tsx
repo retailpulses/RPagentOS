@@ -16,7 +16,7 @@ export default function ListingAudit() {
   const [actionError, setActionError] = useState<string | null>(null)
 
   const { data, loading, error, refetch } = useListingWorkItems(filters)
-  const options = useListingWorkItemOptions(data)
+  const options = useListingWorkItemOptions()
   const statusUpdate = useUpdateListingWorkItemStatus()
   const createTask = useCreateTask()
   const linkTarget = useLinkTarget()
