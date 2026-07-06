@@ -1,6 +1,7 @@
 node_modules
 .env
 .env.local
+.env.cloud.local
 .env.production
 .DS_Store
 dist
