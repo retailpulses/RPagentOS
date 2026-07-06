@@ -30,6 +30,7 @@
     "import:validate": "tsx --env-file=.env.local src/jobs/validate-imports.ts",
     "import:hero-products": "tsx --env-file=.env.local src/jobs/import-hero-products.ts",
     "job:listing:classify": "tsx --env-file=.env.local src/jobs/classify-listing-targets.ts",
+    "job:listing:classify:cloud": "tsx --env-file=.env.cloud.local src/jobs/classify-listing-targets.ts",
     "job:listing:qwen": "tsx --env-file=.env.local src/jobs/run-listing-qwen-review.ts",
     "qwen:bridge": "tsx --env-file=.env.local src/jobs/qwen-bridge.ts",
     "qwen:bridge:cloud": "tsx --env-file=.env.cloud.local src/jobs/qwen-bridge.ts",
