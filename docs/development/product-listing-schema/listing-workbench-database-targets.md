@@ -49,3 +49,29 @@ It is manual-only and defaults to dry-run. Run it with `dry_run=false` only when
 you intend to apply pending migrations to the cloud project.
 
 Local job verification must still use the `SUPABASE_URL` from `.env.local`.
+
+## MVP-1 Local Qwen Bridge
+
+The deployed `/listing` page is static Cloudflare Pages, but MVP-1 Qwen runs through local Ollama. To let the live page run Qwen safely, start the local bridge against the same database target the page is showing.
+
+For local Supabase:
+
+```bash
+npm run qwen:bridge
+```
+
+For cloud Supabase, create a local-only `.env.cloud.local` with:
+
+```text
+SUPABASE_URL=https://gqeyfhshxdiyhugvmbuk.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<cloud secret/service key>
+LISTING_QWEN_MODEL=qwen3.5:9b
+```
+
+Then run:
+
+```bash
+npm run qwen:bridge:cloud
+```
+
+The bridge listens on `http://127.0.0.1:8788`. The browser uses the anon key only; Qwen writes stay inside the local bridge process through the service-role key. Do not expose the bridge publicly.

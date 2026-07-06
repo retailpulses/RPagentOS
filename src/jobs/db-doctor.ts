@@ -7,7 +7,7 @@ type TargetKind = 'local' | 'cloud' | 'unknown';
 
 interface RelationCheck {
   name: string;
-  requiredFor: 'base' | 'workbench';
+  requiredFor: 'base' | 'workbench' | 'qwen';
   exists: boolean;
   count: number | null;
   error: string | null;
@@ -22,6 +22,9 @@ const REQUIRED_RELATIONS: Array<Pick<RelationCheck, 'name' | 'requiredFor'>> = [
   { name: 'product_platform_links', requiredFor: 'base' },
   { name: 'listing_work_items', requiredFor: 'workbench' },
   { name: 'listing_target_classification_v1', requiredFor: 'workbench' },
+  { name: 'listing_intelligence_runs', requiredFor: 'qwen' },
+  { name: 'listing_intelligence_results', requiredFor: 'qwen' },
+  { name: 'listing_qwen_reviews', requiredFor: 'qwen' },
 ];
 
 const url = process.env['SUPABASE_URL'];
@@ -155,6 +158,11 @@ async function main() {
   const missingWorkbench = checks.filter((check) => check.requiredFor === 'workbench' && !check.exists);
   if (missingWorkbench.length > 0) {
     fail(`listing workbench migration is missing: ${missingWorkbench.map((check) => check.name).join(', ')}`);
+  }
+
+  const missingQwen = checks.filter((check) => check.requiredFor === 'qwen' && !check.exists);
+  if (missingQwen.length > 0) {
+    fail(`MVP-1 Qwen review migration is missing: ${missingQwen.map((check) => check.name).join(', ')}`);
   }
 
   console.log('\nDB doctor passed.');

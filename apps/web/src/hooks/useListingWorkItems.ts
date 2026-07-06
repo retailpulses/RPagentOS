@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 
 const DEFAULT_PAGE_SIZE = 200
 const MISSING_SUPABASE_MESSAGE = 'Listing workbench is not connected. Configure Supabase for this deployment.'
+const QWEN_BRIDGE_URL = import.meta.env.VITE_QWEN_BRIDGE_URL || 'http://127.0.0.1:8788'
 
 export interface ListingWorkItem {
   id: string
@@ -50,6 +51,34 @@ export interface ListingWorkItemFilters {
   status?: string
   heroOnly?: boolean
   search?: string
+}
+
+export interface ListingQwenReview {
+  id: string
+  run_id: string | null
+  result_id: string | null
+  work_item_id: string
+  llm_provider: string
+  llm_runtime: string
+  llm_model: string
+  prompt_profile: string
+  prompt_version: string
+  risk_level: string
+  confidence: number | null
+  summary: string | null
+  issues: Array<Record<string, unknown>>
+  recommendations: Array<Record<string, unknown>>
+  suggested_title: string | null
+  suggested_description: string | null
+  suggested_image_plan: Array<Record<string, unknown>>
+  structured_output: Record<string, unknown>
+  validation_status: string
+  validation_errors: Array<Record<string, unknown>> | string[]
+  repair_attempts: number
+  error_message: string | null
+  source_snapshot_hash: string | null
+  source_snapshot_version: number | null
+  created_at: string
 }
 
 function matchesSearch(item: ListingWorkItem, search: string) {
@@ -229,4 +258,68 @@ export function useUpdateListingWorkItemStatus() {
   }
 
   return { update, loading, error }
+}
+
+export function useLatestQwenReview(workItemId: string | null | undefined) {
+  const [data, setData] = useState<ListingQwenReview | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetch = useCallback(async () => {
+    if (!workItemId || !supabase) {
+      setData(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const { data: rows, error: queryError } = await supabase
+        .from('listing_qwen_reviews')
+        .select('*')
+        .eq('work_item_id', workItemId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (queryError) throw queryError
+      setData((rows?.[0] as ListingQwenReview | undefined) ?? null)
+    } catch (e: unknown) {
+      setData(null)
+      setError(e instanceof Error ? e.message : 'Failed to load Qwen review')
+    } finally {
+      setLoading(false)
+    }
+  }, [workItemId])
+
+  useEffect(() => { void fetch() }, [fetch])
+
+  return { data, loading, error, refetch: fetch }
+}
+
+export function useRunQwenReview() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = async (workItemId: string, force = false): Promise<boolean> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch(`${QWEN_BRIDGE_URL}/reviews`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ work_item_id: workItemId, force }),
+      })
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) throw new Error(body.error ?? `Qwen bridge returned ${response.status}`)
+      return true
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to run Qwen review')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return { run, loading, error }
 }

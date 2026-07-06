@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import {
   type ListingWorkItem,
+  type ListingQwenReview,
   type ListingWorkItemFilters,
+  useLatestQwenReview,
   useListingWorkItemOptions,
   useListingWorkItems,
+  useRunQwenReview,
   useUpdateListingWorkItemStatus,
 } from '../hooks/useListingWorkItems'
 import { useCreateTask, useLinkTarget } from '../hooks/useTasks'
@@ -18,12 +21,14 @@ export default function ListingAudit() {
   const { data, loading, error, refetch } = useListingWorkItems(filters)
   const options = useListingWorkItemOptions()
   const statusUpdate = useUpdateListingWorkItemStatus()
+  const qwenRunner = useRunQwenReview()
   const createTask = useCreateTask()
   const linkTarget = useLinkTarget()
 
   const selected = useMemo(() => {
     return data.find(item => item.id === selectedId) ?? data[0] ?? null
   }, [data, selectedId])
+  const qwenReview = useLatestQwenReview(selected?.id)
 
   const summary = useMemo(() => {
     return {
@@ -92,6 +97,16 @@ export default function ListingAudit() {
     await handleStatus(item, 'task_created')
   }
 
+  const handleRunQwenReview = async (item: ListingWorkItem) => {
+    setActionError(null)
+    const ok = await qwenRunner.run(item.id)
+    if (!ok) {
+      setActionError(qwenRunner.error ?? 'Failed to run Qwen review')
+      return
+    }
+    await qwenReview.refetch()
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -154,10 +169,13 @@ export default function ListingAudit() {
         {selected && (
           <WorkItemDetail
             item={selected}
-            busy={statusUpdate.loading || createTask.loading || linkTarget.loading}
+            review={qwenReview.data}
+            reviewLoading={qwenReview.loading}
+            busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading}
             onIgnore={() => void handleStatus(selected, 'ignored')}
             onWaitingInput={() => void handleStatus(selected, 'waiting_for_input')}
             onCreateTask={() => void handleCreateTask(selected)}
+            onRunQwenReview={() => void handleRunQwenReview(selected)}
           />
         )}
       </div>
@@ -192,13 +210,17 @@ function FilterSelect({ label, value, options, formatOption, onChange }: {
   )
 }
 
-function WorkItemDetail({ item, busy, onIgnore, onWaitingInput, onCreateTask }: {
+function WorkItemDetail({ item, review, reviewLoading, busy, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview }: {
   item: ListingWorkItem
+  review: ListingQwenReview | null
+  reviewLoading: boolean
   busy: boolean
   onIgnore: () => void
   onWaitingInput: () => void
   onCreateTask: () => void
+  onRunQwenReview: () => void
 }) {
+  const qwenEligible = isQwenEligible(item)
   return (
     <article className="audit-detail">
       <div className="flex justify-between gap-3 mb-4">
@@ -219,8 +241,9 @@ function WorkItemDetail({ item, busy, onIgnore, onWaitingInput, onCreateTask }: 
         <button className="btn" disabled={busy} onClick={onIgnore}>Ignore</button>
         <button className="btn" disabled={busy} onClick={onWaitingInput}>Mark Waiting Input</button>
         <button className="btn btn-primary" disabled={busy} onClick={onCreateTask}>Create Task</button>
-        <button className="btn" disabled>Run Qwen Review</button>
+        <button className="btn" disabled={busy || !qwenEligible} onClick={onRunQwenReview}>Run Qwen Review</button>
       </div>
+      {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen MVP-1 runs only for mapped Rakuten/Amazon audit items.</p>}
 
       <IssueBlock title="Trace" rows={[
         ['Family', item.product_family_id],
@@ -232,8 +255,50 @@ function WorkItemDetail({ item, busy, onIgnore, onWaitingInput, onCreateTask }: 
       ]} />
       <JsonBlock title="Classification Reasons" value={item.classification_reasons} />
       <JsonBlock title="Deterministic Findings" value={item.deterministic_findings} />
+      <QwenReviewBlock review={review} loading={reviewLoading} />
       <JsonBlock title="Source Context" value={item.source_context} />
     </article>
+  )
+}
+
+function QwenReviewBlock({ review, loading }: { review: ListingQwenReview | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <section className="audit-issue-block">
+        <h4>Qwen Review</h4>
+        <p className="text-sm text-muted">Loading review...</p>
+      </section>
+    )
+  }
+
+  if (!review) {
+    return (
+      <section className="audit-issue-block">
+        <h4>Qwen Review</h4>
+        <p className="text-sm text-muted">No Qwen review yet.</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="audit-issue-block">
+      <h4>Qwen Review</h4>
+      <div className="audit-recommendation mb-3">
+        <span className={`audit-priority ${priorityTone(review.risk_level)}`}>{review.validation_status}</span>
+        <strong>{review.summary ?? 'Qwen review saved'}</strong>
+        <p>{review.llm_model} / {review.prompt_profile} / repairs {review.repair_attempts}</p>
+      </div>
+      <IssueBlock title="Qwen Trace" rows={[
+        ['Review', review.id],
+        ['Result', review.result_id],
+        ['Snapshot', review.source_snapshot_hash ? `${review.source_snapshot_hash.slice(0, 12)} / v${review.source_snapshot_version ?? '-'}` : '-'],
+      ]} />
+      <JsonBlock title="Qwen Issues" value={review.issues} />
+      <JsonBlock title="Qwen Recommendations" value={review.recommendations} />
+      {review.suggested_title && <JsonBlock title="Suggested Title" value={review.suggested_title} />}
+      {review.suggested_description && <JsonBlock title="Suggested Description" value={review.suggested_description} />}
+      {review.validation_errors.length > 0 && <JsonBlock title="Validation Errors" value={review.validation_errors} />}
+    </section>
   )
 }
 
@@ -266,6 +331,18 @@ function priorityTone(value: string) {
   if (value === 'critical' || value === 'high') return 'high'
   if (value === 'medium') return 'medium'
   return 'low'
+}
+
+function isQwenEligible(item: ListingWorkItem) {
+  const findingText = JSON.stringify([item.classification_reasons, item.deterministic_findings]).toLowerCase()
+  return (
+    item.workflow_type === 'audit_existing_listing'
+    && (item.platform === 'rakuten' || item.platform === 'amazon')
+    && item.issue_type !== 'missing_mapping'
+    && item.recommended_action !== 'create_mapping_task'
+    && !findingText.includes('missing_mapping')
+    && !findingText.includes('create_mapping_task')
+  )
 }
 
 function shopLabel(value: string | null | undefined) {
