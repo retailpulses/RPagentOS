@@ -1,0 +1,9 @@
+-- Remote history baseline.
+--
+-- The hosted Supabase project already records migration version 20260707000000
+-- in supabase_migrations.schema_migrations, but the corresponding local file
+-- was not present when the listing quality migrations were merged.
+--
+-- Keep this no-op file so `supabase db push` can reconcile local and remote
+-- migration history before applying later migrations such as
+-- 20260708000000_listing_quality_engineering.sql.
