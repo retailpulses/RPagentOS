@@ -131,7 +131,7 @@ async function main(): Promise<void> {
     if (options.verbose && result.outputs.length > 0) {
       const scores = result.outputs
         .filter(o => !o.skipped && o.result?.final_score != null)
-        .map((o) => o.result.final_score as number);
+        .map((o) => o.result!.final_score as number);
       const avgScore = scores.length > 0
         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
         : 0;

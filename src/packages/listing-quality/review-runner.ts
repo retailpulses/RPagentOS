@@ -39,44 +39,36 @@ interface ListingRef {
  * Get listing IDs that have at least one image row in platform_listing_images.
  * Filters by an optional list of candidate listing IDs to avoid global scans.
  * Paginates properly — no 1000-row truncation.
+ *
+ * If candidateIds is empty or null, returns an empty set — never falls back to
+ * a broad unfiltered scan.
  */
 async function getListingIdsWithImages(
   candidateIds: string[] | null,
 ): Promise<Set<string>> {
   const ids = new Set<string>();
-  const pageSize = 1000;
   const effectiveCandidateIds = candidateIds ?? [];
 
   if (effectiveCandidateIds.length === 0) {
-    // No candidates — query broadly but paginate
-    let offset = 0;
-    while (true) {
-      const { data } = await supabase
-        .from('platform_listing_images')
-        .select('listing_id')
-        .range(offset, offset + pageSize - 1)
-        .order('listing_id');
-
-      if (!data || data.length === 0) break;
-      for (const r of data) ids.add(r.listing_id as string);
-      if (data.length < pageSize) break;
-      offset += pageSize;
-    }
-    return ids;
+    return ids; // empty — no broad scan
   }
 
-  // Query images filtered by candidate listing IDs, batched to avoid URL-length errors
+  // Query images filtered by candidate listing IDs, batched to avoid
+  // URL-length errors and paginated to avoid 1000-row truncation.
   const batchSize = 500;
+  const pageSize = 1000;
+
   for (let i = 0; i < effectiveCandidateIds.length; i += batchSize) {
     const batch = effectiveCandidateIds.slice(i, i + batchSize);
     let offset = 0;
     while (true) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('platform_listing_images')
         .select('listing_id')
         .in('listing_id', batch)
         .range(offset, offset + pageSize - 1);
 
+      if (error) throw new Error(`Fetch images for candidate batch: ${error.message}`);
       if (!data || data.length === 0) break;
       for (const r of data) ids.add(r.listing_id as string);
       if (data.length < pageSize) break;
@@ -87,6 +79,68 @@ async function getListingIdsWithImages(
   return ids;
 }
 
+/**
+ * Execute the final listing query, batching the IN clause when the ID list
+ * is large to avoid hitting PostgREST URL/query limits (cap ~500 IDs per batch).
+ */
+async function fetchListingsWithBatchedIds(
+  platform: string,
+  listingStatus: string,
+  idFilter: string[] | null,
+  spuIdFilter: string[] | null,
+  limit: number,
+): Promise<ListingRef[]> {
+  const COLS = 'id,platform,shop_code,product_spu_id,listing_status';
+
+  // Small or no ID filter → single query
+  if (!idFilter || idFilter.length <= 500) {
+    let query = supabase
+      .from('platform_listings')
+      .select(COLS)
+      .eq('platform', platform)
+      .eq('listing_status', listingStatus);
+
+    if (idFilter && idFilter.length > 0) {
+      query = query.in('id', idFilter);
+    }
+    if (spuIdFilter && spuIdFilter.length > 0) {
+      query = query.in('product_spu_id', spuIdFilter);
+    }
+
+    const { data, error } = await query
+      .order('id', { ascending: true })
+      .limit(limit);
+    if (error) throw new Error(`Select listings: ${error.message}`);
+    return (data ?? []) as unknown as ListingRef[];
+  }
+
+  // Large ID list — batch queries to stay under PostgREST limits
+  const sorted = [...idFilter].sort();
+  const results: ListingRef[] = [];
+
+  for (let i = 0; i < sorted.length && results.length < limit; i += 500) {
+    const batch = sorted.slice(i, i + 500);
+    let batchQuery = supabase
+      .from('platform_listings')
+      .select(COLS)
+      .eq('platform', platform)
+      .eq('listing_status', listingStatus)
+      .in('id', batch);
+
+    if (spuIdFilter && spuIdFilter.length > 0) {
+      batchQuery = batchQuery.in('product_spu_id', spuIdFilter);
+    }
+
+    const { data, error } = await batchQuery
+      .order('id', { ascending: true })
+      .limit(limit - results.length);
+    if (error) throw new Error(`Select listings batch: ${error.message}`);
+    if (data) results.push(...(data as unknown as ListingRef[]));
+  }
+
+  return results;
+}
+
 async function selectListingsForPolicy(
   policy: ReviewPolicy,
   limit: number,
@@ -94,96 +148,80 @@ async function selectListingsForPolicy(
 ): Promise<ListingRef[]> {
   const targetPlatform = platform ?? policy.marketplace;
 
-  // Base: platform filter
-  let query = supabase
-    .from('platform_listings')
-    .select('id,platform,shop_code,product_spu_id,listing_status')
-    .eq('platform', targetPlatform);
-
   switch (policy.scope_type) {
     case 'hero_products': {
-      // Active hero product listings
-      query = query.eq('listing_status', 'active');
-      const { data: heroSpus } = await supabase
+      const { data: heroSpus, error: heroErr } = await supabase
         .from('merchandising_focus_items')
         .select('product_spu_id')
         .eq('focus_type', 'hero')
         .eq('status', 'active');
+      if (heroErr) throw new Error(`Fetch hero SPUs: ${heroErr.message}`);
 
-      if (heroSpus && heroSpus.length > 0) {
-        const spuIds = heroSpus.map((r) => r.product_spu_id);
-        query = query.in('product_spu_id', spuIds);
-      }
-      break;
+      if (!heroSpus || heroSpus.length === 0) return [];
+      const spuIds = heroSpus.map((r) => r.product_spu_id);
+      return fetchListingsWithBatchedIds(targetPlatform, 'active', null, spuIds, limit);
     }
+
+    case 'all_active': {
+      return fetchListingsWithBatchedIds(targetPlatform, 'active', null, null, limit);
+    }
+
     case 'active_with_images': {
-      query = query.eq('listing_status', 'active');
-      // Get active listing IDs first, then filter to those with images
-      const { data: activeListings } = await supabase
+      const { data: activeListings, error: activeErr } = await supabase
         .from('platform_listings')
         .select('id')
         .eq('platform', targetPlatform)
         .eq('listing_status', 'active');
+      if (activeErr) throw new Error(`Fetch active listings: ${activeErr.message}`);
 
       const candidateIds = (activeListings ?? []).map((r) => r.id as string);
+      if (candidateIds.length === 0) return [];
+
       const idsWithImages = await getListingIdsWithImages(candidateIds);
-      if (idsWithImages.size > 0) {
-        query = query.in('id', [...idsWithImages]);
-      } else {
-        query = query.eq('id', '__none__'); // force empty
-      }
-      break;
+      if (idsWithImages.size === 0) return [];
+
+      return fetchListingsWithBatchedIds(targetPlatform, 'active', [...idsWithImages], null, limit);
     }
-    case 'all_active': {
-      query = query.eq('listing_status', 'active');
-      break;
-    }
+
     case 'curated':
     default: {
-      // Curated = hero products + active with images.
-      // Apply BOTH hero SPU filter AND has-images filter.
-      query = query.eq('listing_status', 'active');
-
-      // Get hero SPU IDs
-      const { data: heroSpus } = await supabase
+      // Curated = hero products + active + with images
+      const { data: heroSpus, error: heroErr } = await supabase
         .from('merchandising_focus_items')
         .select('product_spu_id')
         .eq('focus_type', 'hero')
         .eq('status', 'active');
+      if (heroErr) throw new Error(`Fetch hero SPUs: ${heroErr.message}`);
 
-      // Get candidate listing IDs to scope the image query
+      const spuIds = (heroSpus ?? []).map((r) => r.product_spu_id);
+
+      // Get candidate listing IDs (active + optionally hero-filtered)
       let candidateQuery = supabase
         .from('platform_listings')
         .select('id')
         .eq('platform', targetPlatform)
         .eq('listing_status', 'active');
 
-      if (heroSpus && heroSpus.length > 0) {
-        const spuIds = heroSpus.map((r) => r.product_spu_id);
+      if (spuIds.length > 0) {
         candidateQuery = candidateQuery.in('product_spu_id', spuIds);
-        // Apply hero SPU filter to the main query too
-        query = query.in('product_spu_id', spuIds);
       }
 
-      const { data: candidateListings } = await candidateQuery;
+      const { data: candidateListings, error: candErr } = await candidateQuery;
+      if (candErr) throw new Error(`Fetch curated candidates: ${candErr.message}`);
+
       const candidateIds = (candidateListings ?? []).map((r) => r.id as string);
-      const idsWithImages = await getListingIdsWithImages(candidateIds);
+      if (candidateIds.length === 0) return [];
 
-      if (idsWithImages.size > 0) {
-        query = query.in('id', [...idsWithImages]);
-      } else {
-        query = query.eq('id', '__none__');
-      }
-      break;
+      const idsWithImages = await getListingIdsWithImages(candidateIds);
+      if (idsWithImages.size === 0) return [];
+
+      // spuIds already applied via candidateQuery, but pass as safety double-filter
+      return fetchListingsWithBatchedIds(
+        targetPlatform, 'active', [...idsWithImages],
+        spuIds.length > 0 ? spuIds : null, limit,
+      );
     }
   }
-
-  query = query.limit(limit).order('id', { ascending: true });
-
-  const { data, error } = await query;
-  if (error) throw new Error(`Select listings: ${error.message}`);
-
-  return (data ?? []) as unknown as ListingRef[];
 }
 
 // ─── Issue generation from technical findings ─────────────────────────────────
@@ -314,22 +352,29 @@ export async function runTechnicalReview(
     listingId: listingRef.id,
   });
 
-  // 1b. If snapshot is unchanged and already has a completed result, skip.
+  // 1b. If snapshot is unchanged and already has a completed result for the
+  // same review_type AND scoring_version, skip. Without these filters a
+  // daily_technical review could block a future weekly_quality review or a
+  // re-review after scoring logic changes.
   if (isExisting) {
-    const { data: existingResult } = await supabase
+    const { data: existingResult, error: resultErr } = await supabase
       .from('listing_review_results')
       .select('id')
       .eq('snapshot_id', snapshot.id)
+      .eq('review_type', policy.review_type)
+      .eq('scoring_version', SCORING_VERSION)
       .limit(1);
+
+    if (resultErr) throw new Error(`Check existing result: ${resultErr.message}`);
 
     if (existingResult && existingResult.length > 0) {
       return {
         snapshot,
         snapshotImages,
-        result: null as unknown as ReviewResult,
-        job: null as unknown as ReviewJob,
+        result: null,
+        job: null,
         skipped: true,
-      } as ReviewRunOutput;
+      };
     }
   }
 
@@ -548,7 +593,7 @@ export async function runPolicyReview(
         const imagesOk = output.snapshotImages.filter((img) => img.loaded).length;
         console.log(
           `  Done: ${imagesOk}/${output.snapshotImages.length} images loaded, ` +
-          `score=${output.result.final_score}, confidence=${output.result.confidence}`,
+          `score=${output.result?.final_score ?? 'N/A'}, confidence=${output.result?.confidence ?? 'N/A'}`,
         );
       }
     } catch (err) {

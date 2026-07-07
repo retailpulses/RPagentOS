@@ -261,8 +261,10 @@ export interface ReviewRunInput {
 export interface ReviewRunOutput {
   snapshot: ReviewSnapshot;
   snapshotImages: SnapshotImage[];
-  result: ReviewResult;
-  job: ReviewJob;
+  /** null when the review was skipped (snapshot unchanged + already reviewed). */
+  result: ReviewResult | null;
+  /** null when the review was skipped. */
+  job: ReviewJob | null;
   /** True when the snapshot was unchanged and already reviewed (skipped). */
   skipped?: boolean;
 }
