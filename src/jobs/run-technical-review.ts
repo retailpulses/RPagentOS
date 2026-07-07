@@ -122,6 +122,7 @@ async function main(): Promise<void> {
   let grandSkipped = 0;
   let grandErrors = 0;
   let grandWorkItems = 0;
+  let grandWorkItemErrors = 0;
 
   for (const policy of policies) {
     if (options.verbose) {
@@ -137,6 +138,7 @@ async function main(): Promise<void> {
     grandSkipped += result.skipped;
     grandErrors += result.errors;
     grandWorkItems += result.workItemsCreated ?? 0;
+    grandWorkItemErrors += result.workItemErrors ?? 0;
 
     if (options.verbose && result.outputs.length > 0) {
       const scores = result.outputs
@@ -155,12 +157,16 @@ async function main(): Promise<void> {
 
   console.log(
     `\n=== Done: ${grandReviewed} reviewed, ${grandSkipped} skipped, ` +
-    `${grandErrors} errors, ${grandWorkItems} work items ===`,
+    `${grandErrors} errors, ${grandWorkItems} work items, ` +
+    `${grandWorkItemErrors} work item errors ===`,
   );
 
   // Exit nonzero on unexpected failures so cron/monitoring can alert
-  if (grandErrors > 0) {
-    console.error(`ERROR: ${grandErrors} listing review(s) failed.`);
+  if (grandErrors > 0 || grandWorkItemErrors > 0) {
+    console.error(
+      `ERROR: ${grandErrors} listing review(s) failed, ` +
+      `${grandWorkItemErrors} work item creation error(s).`,
+    );
     process.exit(1);
   }
 }

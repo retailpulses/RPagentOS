@@ -270,8 +270,10 @@ export interface ReviewRunOutput {
   job: ReviewJob | null;
   /** True when the snapshot was unchanged and already reviewed (skipped). */
   skipped?: boolean;
-  /** Number of work items created from this review (Phase 2). */
+  /** Number of work items created/updated from this review (Phase 2). */
   workItemsCreated?: number;
+  /** Number of work item creation errors (Phase 2). */
+  workItemErrors?: number;
 }
 
 // ─── Job Options ──────────────────────────────────────────────────────────────

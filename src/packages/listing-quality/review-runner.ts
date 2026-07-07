@@ -500,6 +500,7 @@ function generateRecommendations(
 export async function runTechnicalReview(
   listingRef: ListingRef,
   policy: ReviewPolicy,
+  options?: { skipWorkItems?: boolean },
 ): Promise<ReviewRunOutput> {
   const marketplace = listingRef.platform as Marketplace;
 
@@ -676,31 +677,45 @@ export async function runTechnicalReview(
     if (resultErr) throw new Error(`Insert result: ${resultErr.message}`);
     const result = resultRow as unknown as ReviewResult;
 
-    // 10. Create work items from review result
-    const workItemResult = await createWorkItemsFromReview(result, snapshot);
-    if (workItemResult.errors > 0) {
-      console.error(
-        `Work item creation: ${workItemResult.created} created, ` +
-        `${workItemResult.skipped} skipped, ${workItemResult.errors} errors`,
-      );
+    // 10. Create/update work item from review result (Phase 2)
+    let workItemResult: { created: number; updated: number; skipped: number; errors: number; errorMessages: string[] } = {
+      created: 0, updated: 0, skipped: 0, errors: 0, errorMessages: [],
+    };
+
+    if (options?.skipWorkItems) {
+      // Skipped by explicit flag — not an error
+    } else {
+      workItemResult = await createWorkItemsFromReview(result, snapshot);
+      if (workItemResult.errors > 0) {
+        console.error(
+          `Work item errors: ${workItemResult.errorMessages.join('; ')}`,
+        );
+      }
     }
 
-    // 11. Mark job completed
+    // 11. Mark job completed (with work item error note if applicable)
+    const jobUpdate: Record<string, unknown> = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (workItemResult.errors > 0) {
+      jobUpdate.error_message = `Work item creation had ${workItemResult.errors} error(s): ${workItemResult.errorMessages.join('; ')}`;
+    }
+
     await supabase
       .from('listing_review_jobs')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      .update(jobUpdate)
       .eq('id', job.id);
 
     return {
       snapshot,
       snapshotImages,
       result,
-      job: { ...job, status: 'completed', completed_at: new Date().toISOString() },
-      workItemsCreated: workItemResult.created,
+      job: { ...job, ...jobUpdate } as ReviewJob,
+      workItemsCreated: workItemResult.created + workItemResult.updated,
+      workItemErrors: workItemResult.errors,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -726,8 +741,10 @@ export interface PolicyReviewResult {
   reviewed: number;
   skipped: number;
   errors: number;
-  /** Total work items created across all reviewed listings (Phase 2). */
+  /** Total work items created/updated across all reviewed listings (Phase 2). */
   workItemsCreated: number;
+  /** Unexpcted work item creation errors (should exit nonzero). */
+  workItemErrors: number;
 }
 
 /**
@@ -761,7 +778,9 @@ export async function runPolicyReview(
     }
 
     try {
-      const output = await runTechnicalReview(listing, policy);
+      const output = await runTechnicalReview(listing, policy, {
+        skipWorkItems: options.skipWorkItems,
+      });
       outputs.push(output);
 
       if (output.skipped) {
@@ -783,5 +802,13 @@ export async function runPolicyReview(
   }
 
   const workItemsCreated = outputs.reduce((sum, o) => sum + (o.workItemsCreated ?? 0), 0);
-  return { outputs, reviewed: outputs.filter(o => !o.skipped).length, skipped, errors, workItemsCreated };
+  const workItemErrors = outputs.reduce((sum, o) => sum + (o.workItemErrors ?? 0), 0);
+  return {
+    outputs,
+    reviewed: outputs.filter(o => !o.skipped).length,
+    skipped,
+    errors,
+    workItemsCreated,
+    workItemErrors,
+  };
 }
