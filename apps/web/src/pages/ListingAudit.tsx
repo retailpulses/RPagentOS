@@ -13,7 +13,8 @@ import {
   useUpdateListingWorkItemStatus,
 } from '../hooks/useListingWorkItems'
 import { useCreateTask, useLinkTarget } from '../hooks/useTasks'
-import { useEnqueueReReview, useLatestCycle } from '../hooks/useListingWorkItems'
+import { useEnqueueReReview, useLatestCycle, useLatestCycleResult } from '../hooks/useListingWorkItems'
+import { useCycleActions } from '../hooks/useCycleActions'
 
 const EMPTY_FILTERS: ListingWorkItemFilters = {}
 
@@ -36,6 +37,8 @@ export default function ListingAudit() {
   const qualityResult = useListingReviewResult(selected?.latest_result_id)
   const qwenReview = useLatestQwenReview(selected?.id)
   const cycle = useLatestCycle(selected?.listing_id)
+  const cycleResult = useLatestCycleResult(cycle.data)
+  const cycleActions = useCycleActions()
   const reReview = useEnqueueReReview()
 
   const summary = useMemo(() => {
@@ -131,6 +134,38 @@ export default function ListingAudit() {
     await cycle.refetch()
   }
 
+  const handleCycleApprove = async (cycleState: { id: string }) => {
+    setActionError(null)
+    const result = await cycleActions.approveCycle(cycleState.id)
+    if (!result.ok) {
+      setActionError(result.error ?? 'Failed to approve cycle')
+      return
+    }
+    await cycle.refetch()
+  }
+
+  const handleCycleDefer = async (cycleState: { id: string }) => {
+    setActionError(null)
+    const result = await cycleActions.deferCycle(cycleState.id)
+    if (!result.ok) {
+      setActionError(result.error ?? 'Failed to defer cycle')
+      return
+    }
+    await cycle.refetch()
+  }
+
+  const handleCycleReject = async (cycleState: { id: string }) => {
+    setActionError(null)
+    const confirmed = window.confirm('Reject this cycle? This will mark it as rejected and cannot be undone.')
+    if (!confirmed) return
+    const result = await cycleActions.rejectCycle(cycleState.id)
+    if (!result.ok) {
+      setActionError(result.error ?? 'Failed to reject cycle')
+      return
+    }
+    await cycle.refetch()
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -197,13 +232,17 @@ export default function ListingAudit() {
             reviewLoading={qwenReview.loading}
             qualityResult={qualityResult.data}
             qualityLoading={qualityResult.loading}
-            busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading || reReview.loading}
             cycleState={cycle.data}
+            cycleResult={cycleResult.data}
+            busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading || reReview.loading || cycleActions.loading}
             onIgnore={() => void handleStatus(selected, 'ignored')}
             onWaitingInput={() => void handleStatus(selected, 'waiting_for_input')}
             onCreateTask={() => void handleCreateTask(selected)}
             onRunQwenReview={() => void handleRunQwenReview(selected)}
             onReReview={() => void handleReReview(selected)}
+            onCycleApprove={() => cycle.data && void handleCycleApprove(cycle.data)}
+            onCycleDefer={() => cycle.data && void handleCycleDefer(cycle.data)}
+            onCycleReject={() => cycle.data && void handleCycleReject(cycle.data)}
           />
         )}
       </div>
@@ -238,19 +277,23 @@ function FilterSelect({ label, value, options, formatOption, onChange }: {
   )
 }
 
-function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoading, busy, cycleState, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview, onReReview }: {
+function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoading, cycleState, cycleResult, busy, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview, onReReview, onCycleApprove, onCycleDefer, onCycleReject }: {
   item: ListingWorkItem
   review: ListingQwenReview | null
   reviewLoading: boolean
   qualityResult: ListingReviewResult | null
   qualityLoading: boolean
-  busy: boolean
   cycleState: ListingCycleState | null
+  cycleResult: ListingReviewResult | null
+  busy: boolean
   onIgnore: () => void
   onWaitingInput: () => void
   onCreateTask: () => void
   onRunQwenReview: () => void
   onReReview: () => void
+  onCycleApprove: () => void
+  onCycleDefer: () => void
+  onCycleReject: () => void
 }) {
   const qwenEligible = isQwenEligible(item)
   return (
@@ -286,7 +329,16 @@ function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoa
       {!item.listing_id && <p className="text-xs text-muted mt-2">Re-review requires a linked listing.</p>}
       {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen runs only for mapped Rakuten/Amazon/Mercari audit items.</p>}
 
-      <QualityScoreBlock result={qualityResult} loading={qualityLoading} />
+      <QualityScoreBlock result={qualityResult} loading={qualityLoading} cycle={cycleState} cycleResult={cycleResult} />
+      {cycleState && (cycleState.cycle_status === 'reviewed' || cycleState.cycle_status === 'improved') && (
+        <CycleActionsBar
+          cycle={cycleState}
+          busy={busy}
+          onApprove={onCycleApprove}
+          onDefer={onCycleDefer}
+          onReject={onCycleReject}
+        />
+      )}
       <IssueBlock title="Trace" rows={[
         ['Family', item.product_family_id],
         ['SPU', item.product_spu_id],
@@ -369,7 +421,7 @@ function JsonBlock({ title, value }: { title: string; value: unknown }) {
   )
 }
 
-function QualityScoreBlock({ result, loading }: { result: ListingReviewResult | null; loading: boolean }) {
+function QualityScoreBlock({ result, loading, cycle, cycleResult }: { result: ListingReviewResult | null; loading: boolean; cycle?: ListingCycleState | null; cycleResult?: ListingReviewResult | null }) {
   if (loading) {
     return (
       <section className="audit-issue-block">
@@ -428,6 +480,34 @@ function QualityScoreBlock({ result, loading }: { result: ListingReviewResult | 
           </div>
         ))}
       </div>
+
+      {cycle && cycle.baseline_score != null && cycle.latest_score != null && (
+        <div className={`cycle-delta ${deltaTone(cycle.score_delta)}`}>
+          <span className="cycle-delta-label">Before: {Math.round(cycle.baseline_score)}</span>
+          <span className="cycle-delta-arrow">→</span>
+          <span className="cycle-delta-value">After: {Math.round(cycle.latest_score)}</span>
+          <span className="cycle-delta-badge">
+            {cycle.score_delta != null && cycle.score_delta >= 0 ? '▲' : '▼'} {' '}
+            {cycle.score_delta != null ? Math.abs(Math.round(cycle.score_delta)) : '-'}
+          </span>
+        </div>
+      )}
+
+      {cycle && (
+        <div className="mt-2 text-xs">
+          <span className="text-muted">Cycle: {cycle.cycle_status.replace(/_/g, ' ')}</span>
+          {cycleResult && cycleResult.issues_json && (
+            <span className="ml-3 text-muted">Remaining issues: {cycleResult.issues_json.length}</span>
+          )}
+          <span className="ml-3">
+            {isPublishReady(cycle) ? (
+              <span style={{ color: 'var(--color-success, green)' }}>Ready for publish: Yes</span>
+            ) : (
+              <span style={{ color: 'var(--color-warning, #b8860b)' }}>Ready for publish: No ({publishBlockReason(cycle)})</span>
+            )}
+          </span>
+        </div>
+      )}
 
       {result.recommendations_json && result.recommendations_json.length > 0 && (
         <div className="mt-3">
@@ -520,6 +600,52 @@ function cycleTone(status: string) {
   if (status === 'fix_needed' || status === 'rejected') return 'high'
   if (status === 'fix_in_progress' || status === 're_review_queued' || status === 'review_queued') return 'medium'
   return 'low'
+}
+
+function deltaTone(delta: number | null): string {
+  if (delta == null) return ''
+  if (delta >= 10) return 'delta-positive'
+  if (delta >= 0) return 'delta-neutral'
+  return 'delta-negative'
+}
+
+function isPublishReady(cycle: ListingCycleState): boolean {
+  if (cycle.latest_score == null) return false
+  if (cycle.latest_score < 70) return false
+  if (cycle.cycle_status !== 'improved' && cycle.cycle_status !== 'approved') return false
+  return true
+}
+
+function publishBlockReason(cycle: ListingCycleState): string {
+  if (cycle.latest_score == null) return 'No score yet'
+  if (cycle.latest_score < 70) return 'Score too low'
+  if (cycle.cycle_status !== 'improved' && cycle.cycle_status !== 'approved') return 'Pending approval'
+  return 'Unknown'
+}
+
+function CycleActionsBar({ cycle, busy, onApprove, onDefer, onReject }: {
+  cycle: ListingCycleState
+  busy: boolean
+  onApprove: () => void
+  onDefer: () => void
+  onReject: () => void
+}) {
+  return (
+    <section className="audit-issue-block">
+      <h4>Cycle Actions</h4>
+      <div className="flex gap-2">
+        <button className="btn btn-primary" style={{ backgroundColor: 'var(--color-success, #2e7d32)' }} disabled={busy} onClick={onApprove}>
+          Approve
+        </button>
+        <button className="btn" disabled={busy} onClick={onDefer}>
+          Defer
+        </button>
+        <button className="btn" style={{ backgroundColor: 'var(--color-danger, #c62828)', color: '#fff' }} disabled={busy} onClick={onReject}>
+          Reject
+        </button>
+      </div>
+    </section>
+  )
 }
 
 function isQwenEligible(item: ListingWorkItem) {

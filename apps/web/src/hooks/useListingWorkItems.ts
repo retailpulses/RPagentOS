@@ -403,6 +403,8 @@ export interface ListingCycleState {
   listing_id: string
   marketplace: string
   cycle_status: string
+  baseline_snapshot_id: string | null
+  latest_snapshot_id: string | null
   baseline_score: number | null
   latest_score: number | null
   score_delta: number | null
@@ -447,6 +449,50 @@ export function useLatestCycle(listingId: string | null | undefined) {
       setLoading(false)
     }
   }, [listingId])
+
+  useEffect(() => { void fetch() }, [fetch])
+
+  return { data, loading, error, refetch: fetch }
+}
+
+/**
+ * Fetch the review result for the latest snapshot in a quality cycle.
+ * Uses the cycle's latest_snapshot_id to find the matching review result.
+ * Returns null when no cycle data, no snapshot ID, or no result exists.
+ */
+export function useLatestCycleResult(cycle: { latest_snapshot_id: string | null } | null | undefined) {
+  const [data, setData] = useState<ListingReviewResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const snapshotId = cycle?.latest_snapshot_id ?? null
+
+  const fetch = useCallback(async () => {
+    if (!snapshotId || !supabase) {
+      setData(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const { data: rows, error: queryError } = await supabase
+        .from('listing_review_results')
+        .select('*')
+        .eq('snapshot_id', snapshotId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (queryError) throw queryError
+      setData((rows?.[0] as ListingReviewResult | undefined) ?? null)
+    } catch (e: unknown) {
+      setData(null)
+      setError(e instanceof Error ? e.message : 'Failed to load cycle result')
+    } finally {
+      setLoading(false)
+    }
+  }, [snapshotId])
 
   useEffect(() => { void fetch() }, [fetch])
 
