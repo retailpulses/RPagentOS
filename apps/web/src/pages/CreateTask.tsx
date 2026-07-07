@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCreateTask, useLinkTarget, useTaskSelectOptions } from '../hooks/useTasks'
+import { useProjectOptions } from '../hooks/useProjects'
 import type { TaskType, TaskPriority, OwnerType, OwnerKey, TaskSource } from '@lib/task-types'
 
 export default function CreateTask() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { create, loading, error } = useCreateTask()
   const { link, loading: linking, error: linkError } = useLinkTarget()
   const taskTypeOptions = useTaskSelectOptions('task_type')
@@ -15,6 +17,9 @@ export default function CreateTask() {
   const platformOptions = useTaskSelectOptions('platform')
   const shopCodeOptions = useTaskSelectOptions('shop_code')
   const targetTypeOptions = useTaskSelectOptions('target_type')
+  const { data: projectOptions } = useProjectOptions()
+
+  const preselectedProjectId = searchParams.get('project_id') ?? ''
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -32,7 +37,12 @@ export default function CreateTask() {
   const [targetType, setTargetType] = useState('')
   const [targetId, setTargetId] = useState('')
   const [targetLabel, setTargetLabel] = useState('')
+  const [projectId, setProjectId] = useState(preselectedProjectId)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (preselectedProjectId) setProjectId(preselectedProjectId)
+  }, [preselectedProjectId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,6 +63,7 @@ export default function CreateTask() {
       source,
       approval_required: approvalRequired,
       execution_brief: executionBrief.trim() || undefined,
+      project_id: projectId || null,
     })
     setSubmitting(false)
 
@@ -98,6 +109,16 @@ export default function CreateTask() {
             onChange={e => setDescription(e.target.value)}
             placeholder="Optional description of the task..."
           />
+        </div>
+
+        <div className="form-group">
+          <label>Project</label>
+          <select value={projectId} onChange={e => setProjectId(e.target.value)}>
+            <option value="">No project</option>
+            {projectOptions.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
         <div className="form-row">

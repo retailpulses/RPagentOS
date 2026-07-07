@@ -68,6 +68,7 @@ export interface TaskRow {
   approved_by: string | null;
   agent_run_id: string | null;
   agent_execution_status: AgentExecutionStatus | null;
+  project_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -166,6 +167,7 @@ export interface CreateTaskInput {
   approval_required?: boolean;
   execution_brief?: string;
   created_by?: CreatedBy;
+  project_id?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -183,6 +185,7 @@ export interface UpdateTaskInput {
   source?: TaskSource;
   approval_required?: boolean;
   execution_brief?: string | null;
+  project_id?: string | null;
   metadata?: Record<string, unknown>;
 }
 
