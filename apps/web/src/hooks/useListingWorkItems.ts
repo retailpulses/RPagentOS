@@ -296,6 +296,73 @@ export function useLatestQwenReview(workItemId: string | null | undefined) {
   return { data, loading, error, refetch: fetch }
 }
 
+// ─── Phase 2: Listing Review Result ──────────────────────────────────────────
+
+export interface ListingReviewResult {
+  id: string
+  snapshot_id: string
+  job_id: string | null
+  review_type: string
+  model_name: string | null
+  ocr_engine: string | null
+  scoring_version: string | null
+  technical_score: number | null
+  content_score: number | null
+  image_score: number | null
+  compliance_score: number | null
+  conversion_score: number | null
+  operational_risk_score: number | null
+  final_score: number | null
+  confidence: string
+  score_status: string
+  score_completeness_json: Record<string, boolean>
+  review_completeness: string | null
+  issues_json: Array<Record<string, unknown>>
+  recommendations_json: Array<Record<string, unknown>>
+  raw_outputs_json: Record<string, unknown>
+  created_at: string
+}
+
+/**
+ * Fetch the latest review result for a work item via its latest_result_id.
+ * Returns null if the work item has no linked result or Supabase is unavailable.
+ */
+export function useListingReviewResult(resultId: string | null | undefined) {
+  const [data, setData] = useState<ListingReviewResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetch = useCallback(async () => {
+    if (!resultId || !supabase) {
+      setData(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const { data: rows, error: queryError } = await supabase
+        .from('listing_review_results')
+        .select('*')
+        .eq('id', resultId)
+        .limit(1)
+
+      if (queryError) throw queryError
+      setData((rows?.[0] as ListingReviewResult | undefined) ?? null)
+    } catch (e: unknown) {
+      setData(null)
+      setError(e instanceof Error ? e.message : 'Failed to load review result')
+    } finally {
+      setLoading(false)
+    }
+  }, [resultId])
+
+  useEffect(() => { void fetch() }, [fetch])
+
+  return { data, loading, error, refetch: fetch }
+}
+
 export function useRunQwenReview() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

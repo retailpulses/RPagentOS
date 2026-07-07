@@ -2,6 +2,9 @@
 //
 // Tables: listing_review_policies, listing_review_jobs, listing_review_snapshots,
 //         listing_review_snapshot_images, listing_review_results.
+//
+// Phase 2 adds: ScoreInput, ScoreOutput, ScoreGrade, MarketplaceScoreWeights
+// (imported from marketplace-config.ts and score-engine.ts).
 
 // ─── Enum types ───────────────────────────────────────────────────────────────
 
@@ -267,6 +270,8 @@ export interface ReviewRunOutput {
   job: ReviewJob | null;
   /** True when the snapshot was unchanged and already reviewed (skipped). */
   skipped?: boolean;
+  /** Number of work items created from this review (Phase 2). */
+  workItemsCreated?: number;
 }
 
 // ─── Job Options ──────────────────────────────────────────────────────────────
@@ -277,4 +282,35 @@ export interface TechnicalReviewOptions {
   limit: number;
   platform?: Marketplace;
   verbose: boolean;
+  /** Skip work item creation after review (Phase 2). */
+  skipWorkItems?: boolean;
 }
+
+// ─── Phase 2 Score Engine ───────────────────────────────────────────────────
+
+/** Input to the deterministic score engine. */
+export interface ScoreEngineInput {
+  snapshotImages: SnapshotImage[];
+  issues: QualityIssue[];
+  marketplace: Marketplace;
+  ocrSucceeded: boolean;
+  title: string | null;
+  description: string | null;
+  price: number | null;
+}
+
+/** Output from the deterministic score engine. */
+export interface ScoreEngineOutput {
+  technicalScore: number;
+  imageScore: number;
+  contentScore: number;
+  complianceScore: number;
+  conversionScore: number;
+  operationalRiskScore: number;
+  finalScore: number;
+  scoreStatus: ScoreStatus;
+  scoreCompleteness: ScoreCompleteness;
+  computedDimensions: string[];
+}
+
+export type ScoreGrade = 'critical' | 'high' | 'medium' | 'low';

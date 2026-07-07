@@ -12,6 +12,7 @@
  *   --platform    Filter to specific marketplace (amazon|rakuten|mercari)
  *   --policy-id   Run a specific policy by ID
  *   --verbose     Detailed progress output
+ *   --skip-work-items  Skip work item creation (Phase 2)
  */
 
 import { supabase } from '../lib/supabase.js';
@@ -48,6 +49,9 @@ function parseArgs(): TechnicalReviewOptions & { policyId?: string } {
         break;
       case '--policy-id':
         options.policyId = args[++i];
+        break;
+      case '--skip-work-items':
+        options.skipWorkItems = true;
         break;
     }
   }
@@ -117,16 +121,22 @@ async function main(): Promise<void> {
   let grandReviewed = 0;
   let grandSkipped = 0;
   let grandErrors = 0;
+  let grandWorkItems = 0;
 
   for (const policy of policies) {
     if (options.verbose) {
       console.log(`\nRunning policy: ${policy.name}`);
     }
 
+    if (options.skipWorkItems) {
+      console.log('  (work item creation skipped per --skip-work-items)');
+    }
+
     const result: PolicyReviewResult = await runPolicyReview(policy, options);
     grandReviewed += result.reviewed;
     grandSkipped += result.skipped;
     grandErrors += result.errors;
+    grandWorkItems += result.workItemsCreated ?? 0;
 
     if (options.verbose && result.outputs.length > 0) {
       const scores = result.outputs
@@ -137,14 +147,15 @@ async function main(): Promise<void> {
         : 0;
       console.log(
         `  Reviewed: ${result.reviewed}, skipped: ${result.skipped}, ` +
-        `errors: ${result.errors}, avg technical score: ${avgScore}`,
+        `errors: ${result.errors}, avg quality score: ${avgScore}, ` +
+        `work items: ${result.workItemsCreated ?? 0}`,
       );
     }
   }
 
   console.log(
     `\n=== Done: ${grandReviewed} reviewed, ${grandSkipped} skipped, ` +
-    `${grandErrors} errors ===`,
+    `${grandErrors} errors, ${grandWorkItems} work items ===`,
   );
 
   // Exit nonzero on unexpected failures so cron/monitoring can alert
