@@ -287,7 +287,6 @@ export interface TechnicalReviewOptions {
   /** Skip work item creation after review (Phase 2). */
   skipWorkItems?: boolean;
   /** Skip Qwen visual review (Phase 3). */
-  skipQwen?: boolean;
 }
 
 // ─── Phase 2 Score Engine ───────────────────────────────────────────────────
@@ -298,8 +297,6 @@ export interface ScoreEngineInput {
   issues: QualityIssue[];
   marketplace: Marketplace;
   ocrSucceeded: boolean;
-  /** Whether the Qwen visual review step completed successfully. */
-  qwenSucceeded?: boolean;
   title: string | null;
   description: string | null;
   price: number | null;
@@ -320,37 +317,6 @@ export interface ScoreEngineOutput {
 }
 
 export type ScoreGrade = 'critical' | 'high' | 'medium' | 'low';
-
-// ─── Phase 3: Qwen AI Visual Review Pipeline ──────────────────────────────
-
-/** Input to the Qwen visual review pipeline step (Phase 3). */
-export interface QwenPipelineInput {
-  /** Loaded snapshot images with health check data. */
-  snapshotImages: SnapshotImage[];
-  marketplace: Marketplace;
-  title: string | null;
-  description: string | null;
-  /** OCR text from loaded images, keyed by image_index. */
-  ocrTextByIndex: Record<number, string>;
-  /** Model name to use (default: qwen3.5:9b via Ollama). */
-  modelName?: string;
-}
-
-/** Output from the Qwen visual review pipeline step. */
-export interface QwenPipelineOutput {
-  /** Qwen-detected issues (source: 'qwen_visual'). */
-  issues: QualityIssue[];
-  /** Raw Qwen response for audit trail (stored in raw_outputs_json). */
-  rawOutput: Record<string, unknown>;
-  /** Whether the Qwen call succeeded (false on timeout, model error, etc.). */
-  succeeded: boolean;
-  /** Error message if Qwen review failed. */
-  errorMessage: string | null;
-  /** Model that produced this output. */
-  modelName: string | null;
-  /** Wall-clock duration of the Qwen call in ms. */
-  durationMs: number;
-}
 
 // ─── Phase 4: Marketplace Compliance Rule Engine ──────────────────────────
 

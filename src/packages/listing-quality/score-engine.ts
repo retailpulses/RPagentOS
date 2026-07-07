@@ -301,7 +301,7 @@ export function computeScores(input: ScoreEngineInput): ScoreEngineOutput {
     technical: true,
     ocr: input.ocrSucceeded,
     marketplace_rules: true, // Phase 2
-    qwen_visual: input.qwenSucceeded ?? false, // Phase 3
+    qwen_visual: false,      // Phase 4 (queued async Qwen per design spec)
     human_review: false,
   };
 

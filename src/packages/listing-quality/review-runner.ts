@@ -2,12 +2,11 @@
 //
 // Phase 1: snapshot → health check → OCR → duplicate detection → result.
 // Phase 2: + marketplace score engine → recommendations → work items.
-// Qwen visual review is deferred to Phase 4.
+// Marketplace compliance rules (Phase 4 per design spec) added in feature/marketplace-compliance-rules.
 
 import { captureSnapshot } from './snapshot-capture.js';
 import { checkImageHealthBatch } from './image-health-check.js';
 import { runOcrForImage, detectOcrKeywords } from './ocr-extraction.js';
-import { runQwenVisualReview } from './qwen-pipeline.js';
 import { detectDuplicates } from './duplicate-detection.js';
 import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
 import { getIssueDefinition } from './issue-taxonomy.js';
@@ -503,7 +502,7 @@ function generateRecommendations(
 export async function runTechnicalReview(
   listingRef: ListingRef,
   policy: ReviewPolicy,
-  options?: { skipWorkItems?: boolean; skipQwen?: boolean; verbose?: boolean },
+  options?: { skipWorkItems?: boolean; verbose?: boolean },
 ): Promise<ReviewRunOutput> {
   const marketplace = listingRef.platform as Marketplace;
 
@@ -628,41 +627,11 @@ export async function runTechnicalReview(
       }
     }
 
-    // 5b. Run Qwen visual review if enabled by policy (Phase 3)
-    let qwenIssues: QualityIssue[] = [];
-    let qwenSucceeded = false;
-    let qwenRawOutput: Record<string, unknown> | undefined;
-
-    if (policy.qwen_enabled && !options?.skipQwen) {
-      const ocrTextByIndex: Record<number, string> = {};
-      for (const img of snapshotImages) {
-        if (img.ocr_text) {
-          ocrTextByIndex[img.image_index] = img.ocr_text;
-        }
-      }
-
-      const qwenOutput = await runQwenVisualReview({
-        snapshotImages,
-        marketplace,
-        title: snapshot.title,
-        description: snapshot.description,
-        ocrTextByIndex,
-      });
-
-      qwenIssues = qwenOutput.issues;
-      qwenSucceeded = qwenOutput.succeeded;
-      qwenRawOutput = qwenOutput.rawOutput;
-
-      if (options?.verbose) {
-        console.log(`  Qwen review: ${qwenOutput.succeeded ? "succeeded" : "failed"} (${qwenOutput.durationMs}ms, ${qwenOutput.issues.length} issues)`);
-      }
-    }
-
     // 6. Generate all issues (technical + duplicate + OCR keyword detection)
     const technicalIssues = generateTechnicalIssues(snapshotImages, marketplace);
     const duplicateIssues = generateDuplicateIssues(snapshotImages, marketplace);
     const ocrIssues = generateOcrIssues(snapshotImages, marketplace);
-    let allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues, ...qwenIssues];
+    let allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues];
 
     // 6b. Run marketplace compliance rules (Phase 4)
     const ocrTextByIndex = buildOcrTextIndex(snapshotImages);
@@ -680,7 +649,6 @@ export async function runTechnicalReview(
       issues: allIssues,
       marketplace,
       ocrSucceeded,
-      qwenSucceeded,
       title: snapshot.title,
       description: snapshot.description,
       price: snapshot.price,
@@ -691,7 +659,7 @@ export async function runTechnicalReview(
     const recommendations = generateRecommendations(allIssues, scores.finalScore, marketplace);
 
     // 9. Insert review result with all 6 sub-scores
-    const reviewCompleteness = qwenSucceeded ? 'technical_ocr_qwen' : ocrSucceeded ? 'technical_ocr_marketplace' : 'technical_only';
+    const reviewCompleteness = ocrSucceeded ? 'technical_ocr_marketplace' : 'technical_only';
     const { data: resultRow, error: resultErr } = await supabase
       .from('listing_review_results')
       .insert({
@@ -714,7 +682,6 @@ export async function runTechnicalReview(
         issues_json: allIssues as unknown as Record<string, unknown>[],
         recommendations_json: recommendations as unknown as Record<string, unknown>[],
         raw_outputs_json: {
-          ...(qwenRawOutput ? { qwen_review: qwenRawOutput } : {}),
           marketplace_rules: {
             rulesChecked: marketplaceRuleOutput.rulesChecked,
             rulesPassed: marketplaceRuleOutput.rulesPassed,
@@ -831,7 +798,6 @@ export async function runPolicyReview(
     try {
       const output = await runTechnicalReview(listing, policy, {
         skipWorkItems: options.skipWorkItems,
-        skipQwen: options.skipQwen,
         verbose: options.verbose,
       });
       outputs.push(output);

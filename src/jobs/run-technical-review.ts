@@ -54,9 +54,6 @@ function parseArgs(): TechnicalReviewOptions & { policyId?: string } {
       case '--skip-work-items':
         options.skipWorkItems = true;
         break;
-      case '--skip-qwen':
-        options.skipQwen = true;
-        break;
     }
   }
 
