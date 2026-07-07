@@ -154,6 +154,8 @@ export async function updateCycleStatus(
   cycleId: string,
   status: CycleStatus,
   opts?: {
+    baselineSnapshotId?: string;
+    baselineScore?: number;
     latestSnapshotId?: string;
     latestScore?: number;
     scoreDelta?: number;
@@ -164,6 +166,12 @@ export async function updateCycleStatus(
     updated_at: new Date().toISOString(),
   };
 
+  if (opts?.baselineSnapshotId !== undefined) {
+    update['baseline_snapshot_id'] = opts.baselineSnapshotId;
+  }
+  if (opts?.baselineScore !== undefined) {
+    update['baseline_score'] = opts.baselineScore;
+  }
   if (opts?.latestSnapshotId !== undefined) {
     update['latest_snapshot_id'] = opts.latestSnapshotId;
   }

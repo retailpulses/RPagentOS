@@ -70,7 +70,7 @@ async function getListingIdsWithImages(
 
   // Query images filtered by candidate listing IDs, batched to avoid
   // URL-length errors and paginated to avoid 1000-row truncation.
-  const batchSize = 500;
+  const batchSize = 100; // Keep IN-clause short — 500 UUIDs blows PostgREST URL limit
   const pageSize = 1000;
 
   for (let i = 0; i < effectiveCandidateIds.length; i += batchSize) {
@@ -96,7 +96,7 @@ async function getListingIdsWithImages(
 
 /**
  * Execute the final listing query, batching the IN clause when the ID list
- * is large to avoid hitting PostgREST URL/query limits (cap ~500 IDs per batch).
+ * is large to avoid hitting PostgREST URL/query limits (cap ~200 IDs per batch).
  */
 async function fetchListingsWithBatchedIds(
   platform: string,
@@ -108,7 +108,7 @@ async function fetchListingsWithBatchedIds(
   const COLS = 'id,platform,shop_code,product_spu_id,listing_status';
 
   // Small or no ID filter → single query
-  if (!idFilter || idFilter.length <= 500) {
+  if (!idFilter || idFilter.length <= 200) {
     let query = supabase
       .from('platform_listings')
       .select(COLS)
@@ -133,8 +133,8 @@ async function fetchListingsWithBatchedIds(
   const sorted = [...idFilter].sort();
   const results: ListingRef[] = [];
 
-  for (let i = 0; i < sorted.length && results.length < limit; i += 500) {
-    const batch = sorted.slice(i, i + 500);
+  for (let i = 0; i < sorted.length && results.length < limit; i += 200) {
+    const batch = sorted.slice(i, i + 200);
     let batchQuery = supabase
       .from('platform_listings')
       .select(COLS)
@@ -545,13 +545,16 @@ export async function runTechnicalReview(
   }
 
   // 2. Create job record
+  // Use policy.id as trigger_policy_id only when it's a real UUID (re-review
+  // passes a synthetic policy with a non-UUID id like "re-review-<cycle-uuid>").
+  const policyIdIsUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(policy.id);
   const { data: jobRow, error: jobErr } = await supabase
     .from('listing_review_jobs')
     .insert({
       snapshot_id: snapshot.id,
       cycle_id: options?.cycleId ?? null,
-      trigger_source: 'scheduled',
-      trigger_policy_id: policy.id,
+      trigger_source: policy.review_type === 'event_triggered' ? 're_review' : 'scheduled',
+      trigger_policy_id: policyIdIsUuid ? policy.id : null,
       marketplace,
       review_type: policy.review_type,
       status: 'running',
@@ -833,10 +836,10 @@ export async function runReReview(
     cycleId: cycle.id,
   });
 
-  // 5. Compute score delta
+  // 5. Compute score delta (always against baseline, not latest)
   const cycleScoreDelta: number | null =
-    output.result != null
-      ? (output.result.final_score ?? 0) - (cycle.latest_score ?? cycle.baseline_score ?? 0)
+    output.result != null && cycle.baseline_score != null
+      ? (output.result.final_score ?? 0) - cycle.baseline_score
       : null;
 
   // 6. Determine next cycle status
@@ -932,15 +935,21 @@ export async function runPolicyReview(
             'new_listing_imported',
           );
 
+          const isFirstReview = cycle.baseline_score == null;
           const cycleStatus: CycleStatus =
             output.result != null && output.result.issues_json.length > 0
               ? 'fix_needed'
               : 'reviewed';
 
+          // First review establishes baseline; subsequent reviews update latest
           await updateCycleStatus(cycle.id, cycleStatus, {
+            ...(isFirstReview ? {
+              baselineSnapshotId: output.snapshot.id,
+              baselineScore: output.result?.final_score ?? undefined,
+            } : {}),
             latestSnapshotId: output.snapshot.id,
             latestScore: output.result?.final_score ?? undefined,
-            scoreDelta: undefined,
+            scoreDelta: isFirstReview ? 0 : undefined,
           });
         } catch (cycleErr) {
           console.error(`  Cycle update error for ${listing.id}: ${cycleErr instanceof Error ? cycleErr.message : String(cycleErr)}`);
