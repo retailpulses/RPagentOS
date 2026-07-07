@@ -7,7 +7,7 @@
 import { captureSnapshot } from './snapshot-capture.js';
 import { checkImageHealthBatch } from './image-health-check.js';
 import { runOcrForImage, detectOcrKeywords } from './ocr-extraction.js';
-import { runQwenVisualReview } from './qwen-pipeline.js';
+import { enqueueQwenReview } from './qwen-review-integration.js';
 import { detectDuplicates } from './duplicate-detection.js';
 import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
 import { getIssueDefinition } from './issue-taxonomy.js';
@@ -635,35 +635,15 @@ export async function runTechnicalReview(
       }
     }
 
-    // 5b. Run Qwen visual review if enabled by policy (Phase 3)
+    // 5b. Qwen visual review is handled asynchronously in Phase 4.
+    //     The synchronous runQwenVisualReview call was removed -- Qwen is
+    //     enqueued in step 12 after work item creation. The bridge worker
+    //     (qwen-bridge.ts) processes it asynchronously.
+    //     ScoreCompleteness.qwen_visual starts false; applyQwenFindings()
+    //     flips it to true when the bridge completes.
     let qwenIssues: QualityIssue[] = [];
     let qwenSucceeded = false;
     let qwenRawOutput: Record<string, unknown> | undefined;
-
-    if (policy.qwen_enabled && !options?.skipQwen) {
-      const ocrTextByIndex: Record<number, string> = {};
-      for (const img of snapshotImages) {
-        if (img.ocr_text) {
-          ocrTextByIndex[img.image_index] = img.ocr_text;
-        }
-      }
-
-      const qwenOutput = await runQwenVisualReview({
-        snapshotImages,
-        marketplace,
-        title: snapshot.title,
-        description: snapshot.description,
-        ocrTextByIndex,
-      });
-
-      qwenIssues = qwenOutput.issues;
-      qwenSucceeded = qwenOutput.succeeded;
-      qwenRawOutput = qwenOutput.rawOutput;
-
-      if (options?.verbose) {
-        console.log(`  Qwen review: ${qwenOutput.succeeded ? "succeeded" : "failed"} (${qwenOutput.durationMs}ms, ${qwenOutput.issues.length} issues)`);
-      }
-    }
 
     // 6. Generate all issues (technical + duplicate + OCR keyword detection)
     const technicalIssues = generateTechnicalIssues(snapshotImages, marketplace);
@@ -688,7 +668,10 @@ export async function runTechnicalReview(
     const recommendations = generateRecommendations(allIssues, scores.finalScore, marketplace);
 
     // 9. Insert review result with all 6 sub-scores
-    const reviewCompleteness = qwenSucceeded ? 'technical_ocr_qwen' : ocrSucceeded ? 'technical_ocr_marketplace' : 'technical_only';
+    // Phase 4: Qwen is async -- review_completeness does not mention Qwen.
+    // Qwen findings are applied later by applyQwenFindings() which upgrades
+    // score_completeness_json.qwen_visual and review_completeness.
+    const reviewCompleteness = ocrSucceeded ? 'technical_ocr_marketplace' : 'technical_only';
     const { data: resultRow, error: resultErr } = await supabase
       .from('listing_review_results')
       .insert({
@@ -710,7 +693,8 @@ export async function runTechnicalReview(
         review_completeness: reviewCompleteness,
         issues_json: allIssues as unknown as Record<string, unknown>[],
         recommendations_json: recommendations as unknown as Record<string, unknown>[],
-        raw_outputs_json: (() => { const ro: Record<string, unknown> = {}; if (qwenRawOutput) ro["qwen_review"] = qwenRawOutput; return ro; })(),
+        raw_outputs_json: {},
+        // Phase 4: qwen_review_request_id is added later by enqueueQwenReview()
       })
       .select('*')
       .single();
@@ -731,6 +715,27 @@ export async function runTechnicalReview(
         console.error(
           `Work item errors: ${workItemResult.errorMessages.join('; ')}`,
         );
+      }
+    }
+
+    // 12. Enqueue Qwen review if enabled by policy (Phase 4 -- async, non-blocking).
+    //     This creates a listing_qwen_review_requests row. The bridge worker
+    //     (qwen-bridge.ts) polls it, calls Ollama, and stores results in
+    //     listing_qwen_reviews. A separate CLI job (apply-qwen-findings.ts)
+    //     later reads the completed Qwen output and enriches this result.
+    //
+    //     Does not block -- review completes without Qwen findings.
+    //     qwen_review_request_id stored in raw_outputs_json for traceability.
+    let qwenReviewRequestId: string | undefined;
+    if (policy.qwen_enabled && !options?.skipQwen) {
+      const qwenResult = await enqueueQwenReview(result, snapshot, snapshotImages, policy);
+      if (qwenResult.requestId) {
+        qwenReviewRequestId = qwenResult.requestId;
+        if (options?.verbose) {
+          console.log(`  Qwen review queued: ${qwenResult.requestId}`);
+        }
+      } else {
+        console.error(`  Qwen enqueue failed: ${qwenResult.error}`);
       }
     }
 
@@ -758,6 +763,7 @@ export async function runTechnicalReview(
       workItemsCreated: workItemResult.created + workItemResult.updated,
       workItemErrors: workItemResult.errors,
       cycle_id: options?.cycleId ?? undefined,
+      qwenReviewRequestId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
