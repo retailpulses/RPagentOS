@@ -50,12 +50,12 @@ jobs:
 
       - name: Dry-run migration push
         if: ${{ inputs.dry_run == 'true' }}
-        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --dry-run
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --include-all --dry-run
 
       - name: Apply migrations
         if: ${{ inputs.dry_run == 'false' }}
-        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --include-all
 
       - name: Verify no pending migrations
         if: ${{ inputs.dry_run == 'false' }}
-        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --dry-run
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --include-all --dry-run
