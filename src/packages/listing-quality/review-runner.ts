@@ -12,6 +12,11 @@ import { detectDuplicates } from './duplicate-detection.js';
 import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
 import { getIssueDefinition } from './issue-taxonomy.js';
 import { createWorkItemsFromReview } from './work-item-factory.js';
+import {
+  getOrCreateCycle,
+  updateCycleStatus,
+  enqueueReReview,
+} from './re-review-trigger.js';
 import { supabase } from '../../lib/supabase.js';
 import type { IssueType } from './issue-taxonomy.js';
 import type {
@@ -26,6 +31,9 @@ import type {
   TechnicalReviewOptions,
   Marketplace,
   ReviewType,
+  CycleStatus,
+  ReReviewTriggerSource,
+  ListingQualityCycle,
 } from './types.js';
 
 // ─── Scoring version ──────────────────────────────────────────────────────────
@@ -501,7 +509,7 @@ function generateRecommendations(
 export async function runTechnicalReview(
   listingRef: ListingRef,
   policy: ReviewPolicy,
-  options?: { skipWorkItems?: boolean; skipQwen?: boolean; verbose?: boolean },
+  options?: { skipWorkItems?: boolean; skipQwen?: boolean; verbose?: boolean; cycleId?: string },
 ): Promise<ReviewRunOutput> {
   const marketplace = listingRef.platform as Marketplace;
 
@@ -541,6 +549,7 @@ export async function runTechnicalReview(
     .from('listing_review_jobs')
     .insert({
       snapshot_id: snapshot.id,
+      cycle_id: options?.cycleId ?? null,
       trigger_source: 'scheduled',
       trigger_policy_id: policy.id,
       marketplace,
@@ -748,6 +757,7 @@ export async function runTechnicalReview(
       job: { ...job, ...jobUpdate } as ReviewJob,
       workItemsCreated: workItemResult.created + workItemResult.updated,
       workItemErrors: workItemResult.errors,
+      cycle_id: options?.cycleId ?? undefined,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -766,6 +776,90 @@ export async function runTechnicalReview(
 
     throw err;
   }
+}
+
+// ─── Phase 3: Event-Triggered Re-review ─────────────────────────────────────
+
+/**
+ * Run a re-review for a listing, managing the quality cycle lifecycle.
+ *
+ * Pipeline: get/create cycle → set cycle to review_queued → run full
+ * technical review → update cycle with latest snapshot/score/delta →
+ * set cycle status to 'reviewed' or 'fix_needed'.
+ *
+ * @returns The review run output augmented with cycle info.
+ */
+export async function runReReview(
+  listingRef: ListingRef,
+  trigger: ReReviewTriggerSource,
+  options?: { skipWorkItems?: boolean; verbose?: boolean },
+): Promise<ReviewRunOutput & { cycle: ListingQualityCycle; scoreDelta: number | null }> {
+  const marketplace = listingRef.platform as Marketplace;
+
+  // 1. Get or create a quality cycle for this listing
+  const cycle = await getOrCreateCycle(listingRef.id, marketplace, trigger);
+
+  // 2. Set cycle to review_queued
+  await updateCycleStatus(cycle.id, 'review_queued');
+
+  // 3. Create a minimal policy-like object for the review pipeline
+  //    We use the trigger source as the review_type and default settings.
+  const reReviewPolicy: ReviewPolicy = {
+    id: 're-review-' + cycle.id,
+    name: `Re-review (${trigger})`,
+    marketplace,
+    scope_type: 'custom',
+    scope_filter_json: {},
+    review_type: 'event_triggered',
+    schedule_cron: null,
+    priority: 100,
+    qwen_enabled: false,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  // 4. Run the full technical review pipeline with cycle_id
+  const output = await runTechnicalReview(listingRef, reReviewPolicy, {
+    skipWorkItems: options?.skipWorkItems ?? false,
+    skipQwen: true, // No Qwen on auto re-review
+    verbose: options?.verbose,
+    cycleId: cycle.id,
+  });
+
+  // 5. Compute score delta
+  const cycleScoreDelta: number | null =
+    output.result != null
+      ? (output.result.final_score ?? 0) - (cycle.latest_score ?? cycle.baseline_score ?? 0)
+      : null;
+
+  // 6. Determine next cycle status
+  const nextStatus: CycleStatus =
+    output.result != null && output.result.issues_json.length > 0
+      ? 'fix_needed'
+      : 'reviewed';
+
+  // 7. Update cycle with latest result
+  await updateCycleStatus(cycle.id, nextStatus, {
+    latestSnapshotId: output.snapshot.id,
+    latestScore: output.result?.final_score ?? undefined,
+    scoreDelta: cycleScoreDelta != null ? cycleScoreDelta : undefined,
+  });
+
+  // 8. Fetch the updated cycle to return
+  const { data: updatedCycle, error: fetchErr } = await supabase
+    .from('listing_quality_cycles')
+    .select('*')
+    .eq('id', cycle.id)
+    .single();
+
+  if (fetchErr) throw new Error(`Fetch updated cycle: ${fetchErr.message}`);
+
+  return {
+    ...output,
+    cycle: updatedCycle as unknown as ListingQualityCycle,
+    scoreDelta: cycleScoreDelta,
+  } as ReviewRunOutput & { cycle: ListingQualityCycle; scoreDelta: number | null };
 }
 
 export interface PolicyReviewResult {
@@ -822,12 +916,37 @@ export async function runPolicyReview(
         if (options.verbose) {
           console.log(`  Skipped: snapshot unchanged and already reviewed`);
         }
-      } else if (options.verbose) {
-        const imagesOk = output.snapshotImages.filter((img) => img.loaded).length;
-        console.log(
-          `  Done: ${imagesOk}/${output.snapshotImages.length} images loaded, ` +
-          `score=${output.result?.final_score ?? 'N/A'}, confidence=${output.result?.confidence ?? 'N/A'}`,
-        );
+      } else {
+        // Phase 3: Create/reuse quality cycle for first-time scheduled reviews
+        try {
+          const marketplace = listing.platform as Marketplace;
+          const cycle = await getOrCreateCycle(
+            listing.id,
+            marketplace,
+            'new_listing_imported',
+          );
+
+          const cycleStatus: CycleStatus =
+            output.result != null && output.result.issues_json.length > 0
+              ? 'fix_needed'
+              : 'reviewed';
+
+          await updateCycleStatus(cycle.id, cycleStatus, {
+            latestSnapshotId: output.snapshot.id,
+            latestScore: output.result?.final_score ?? undefined,
+            scoreDelta: undefined,
+          });
+        } catch (cycleErr) {
+          console.error(`  Cycle update error for ${listing.id}: ${cycleErr instanceof Error ? cycleErr.message : String(cycleErr)}`);
+        }
+
+        if (options.verbose) {
+          const imagesOk = output.snapshotImages.filter((img) => img.loaded).length;
+          console.log(
+            `  Done: ${imagesOk}/${output.snapshotImages.length} images loaded, ` +
+            `score=${output.result?.final_score ?? 'N/A'}, confidence=${output.result?.confidence ?? 'N/A'}`,
+          );
+        }
       }
     } catch (err) {
       errors++;
