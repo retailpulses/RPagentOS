@@ -110,6 +110,8 @@ export interface CaptureInput {
 export interface CaptureOutput {
   snapshot: ReviewSnapshot;
   images: SnapshotImage[];
+  /** True if this snapshot already existed (idempotent hit). */
+  isExisting: boolean;
 }
 
 /**
@@ -125,7 +127,7 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     .filter((r) => r.image_url)
     .map((r) => r.image_url as string);
 
-  const isMainImage = (pos: number) => pos === 0;
+  const isMainImage = (pos: number) => pos === 0 || pos === 1;
 
   const sourceHash = computeSourceHash({
     listing_id: listing.id,
@@ -133,7 +135,7 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     description: listing.description,
     status: listing.listing_status,
     price: listing.current_price,
-    image_urls: imageUrls.sort(),
+    image_urls: imageUrls,
     product_spu_id: listing.product_spu_id,
   });
 
@@ -147,9 +149,10 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     .limit(1);
 
   if (existing && existing.length > 0) {
-    // Return existing snapshot + images
+    // Return existing snapshot + images (idempotent — same source_hash)
     const snapshotId = (existing[0] as { id: string }).id;
-    return loadExistingSnapshot(snapshotId);
+    const loaded = await loadExistingSnapshot(snapshotId);
+    return { ...loaded, isExisting: true };
   }
 
   // Insert snapshot
@@ -204,7 +207,7 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     snapshotImages.push(imgRow as unknown as SnapshotImage);
   }
 
-  return { snapshot, images: snapshotImages };
+  return { snapshot, images: snapshotImages, isExisting: false };
 }
 
 /**
@@ -230,5 +233,6 @@ async function loadExistingSnapshot(snapshotId: string): Promise<CaptureOutput> 
   return {
     snapshot: snap as unknown as ReviewSnapshot,
     images: (imgs ?? []) as unknown as SnapshotImage[],
+    isExisting: true,
   };
 }
