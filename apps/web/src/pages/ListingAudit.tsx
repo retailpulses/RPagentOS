@@ -3,7 +3,9 @@ import {
   type ListingWorkItem,
   type ListingQwenReview,
   type ListingWorkItemFilters,
+  type ListingReviewResult,
   useLatestQwenReview,
+  useListingReviewResult,
   useListingWorkItemOptions,
   useListingWorkItems,
   useRunQwenReview,
@@ -28,6 +30,8 @@ export default function ListingAudit() {
   const selected = useMemo(() => {
     return data.find(item => item.id === selectedId) ?? data[0] ?? null
   }, [data, selectedId])
+
+  const qualityResult = useListingReviewResult(selected?.latest_result_id)
   const qwenReview = useLatestQwenReview(selected?.id)
 
   const summary = useMemo(() => {
@@ -173,6 +177,8 @@ export default function ListingAudit() {
             item={selected}
             review={qwenReview.data}
             reviewLoading={qwenReview.loading}
+            qualityResult={qualityResult.data}
+            qualityLoading={qualityResult.loading}
             busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading}
             onIgnore={() => void handleStatus(selected, 'ignored')}
             onWaitingInput={() => void handleStatus(selected, 'waiting_for_input')}
@@ -212,10 +218,12 @@ function FilterSelect({ label, value, options, formatOption, onChange }: {
   )
 }
 
-function WorkItemDetail({ item, review, reviewLoading, busy, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview }: {
+function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoading, busy, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview }: {
   item: ListingWorkItem
   review: ListingQwenReview | null
   reviewLoading: boolean
+  qualityResult: ListingReviewResult | null
+  qualityLoading: boolean
   busy: boolean
   onIgnore: () => void
   onWaitingInput: () => void
@@ -247,6 +255,7 @@ function WorkItemDetail({ item, review, reviewLoading, busy, onIgnore, onWaiting
       </div>
       {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen runs only for mapped Rakuten/Amazon/Mercari audit items.</p>}
 
+      <QualityScoreBlock result={qualityResult} loading={qualityLoading} />
       <IssueBlock title="Trace" rows={[
         ['Family', item.product_family_id],
         ['SPU', item.product_spu_id],
@@ -256,7 +265,7 @@ function WorkItemDetail({ item, review, reviewLoading, busy, onIgnore, onWaiting
         ['Snapshot', item.source_snapshot_hash ? `${item.source_snapshot_hash.slice(0, 12)} / v${item.source_snapshot_version}` : `v${item.source_snapshot_version}`],
       ]} />
       <JsonBlock title="Classification Reasons" value={item.classification_reasons} />
-      <JsonBlock title="Deterministic Findings" value={item.deterministic_findings} />
+      <StructuredFindingsBlock findings={item.deterministic_findings} />
       <QwenReviewBlock review={review} loading={reviewLoading} />
       <JsonBlock title="Source Context" value={item.source_context} />
     </article>
@@ -325,6 +334,146 @@ function JsonBlock({ title, value }: { title: string; value: unknown }) {
     <section className="audit-issue-block">
       <h4>{title}</h4>
       <pre>{JSON.stringify(value, null, 2)}</pre>
+    </section>
+  )
+}
+
+function QualityScoreBlock({ result, loading }: { result: ListingReviewResult | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <section className="audit-issue-block">
+        <h4>Quality Score</h4>
+        <p className="text-sm text-muted">Loading scores...</p>
+      </section>
+    )
+  }
+
+  if (!result) {
+    return (
+      <section className="audit-issue-block">
+        <h4>Quality Score</h4>
+        <p className="text-sm text-muted">No quality review yet. Run a technical review to generate scores.</p>
+      </section>
+    )
+  }
+
+  const SCORE_DIMS: Array<[string, number | null, string]> = [
+    ['Technical', result.technical_score, 'Image health & loading'],
+    ['Image', result.image_score, 'Count, main image, quality'],
+    ['Content', result.content_score, 'OCR text, title, description'],
+    ['Compliance', result.compliance_score, 'Marketplace rules'],
+    ['Conversion', result.conversion_score, 'Buyer conversion optimization'],
+    ['Operational Risk', result.operational_risk_score, 'Risk factors'],
+  ]
+
+  return (
+    <section className="audit-issue-block">
+      <h4>Quality Score</h4>
+      <div className="flex justify-between gap-3 mb-3">
+        <div>
+          <span className={`audit-priority ${priorityTone(scoreGrade(result.final_score))}`}>
+            {result.final_score != null ? Math.round(result.final_score) : '-'}
+          </span>
+          <strong className="ml-2">{scoreGradeLabel(result.final_score)}</strong>
+        </div>
+        <div className="text-xs text-muted">
+          v{result.scoring_version} / {result.review_completeness ?? 'partial'} / {result.confidence}
+        </div>
+      </div>
+
+      <div className="score-grid">
+        {SCORE_DIMS.map(([label, score, hint]) => (
+          <div key={label} className="score-bar-row">
+            <div className="flex justify-between text-xs mb-1">
+              <span title={hint}>{label}</span>
+              <span>{score != null ? Math.round(score) : '-'}</span>
+            </div>
+            <div className="score-bar-track">
+              <div
+                className={`score-bar-fill ${scoreTone(score)}`}
+                style={{ width: `${score != null ? Math.max(0, Math.min(100, score)) : 0}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {result.recommendations_json && result.recommendations_json.length > 0 && (
+        <div className="mt-3">
+          <h5 className="text-sm mb-2">Recommendations</h5>
+          {result.recommendations_json.map((rec, idx) => (
+            <div key={idx} className="audit-recommendation mb-2">
+              <span className={`audit-priority ${priorityTone(String(rec['priority'] ?? 'medium'))}`}>
+                {String(rec['priority'] ?? 'medium')}
+              </span>
+              <strong>{String(rec['fix_type'] ?? 'review')}</strong>
+              <p>{String(rec['reason'] ?? '')}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function scoreGrade(score: number | null): string {
+  if (score == null) return 'low'
+  if (score < 40) return 'critical'
+  if (score < 60) return 'high'
+  if (score < 80) return 'medium'
+  return 'low'
+}
+
+function scoreGradeLabel(score: number | null): string {
+  if (score == null) return 'No score'
+  if (score < 40) return 'Critical'
+  if (score < 60) return 'Needs Review'
+  if (score < 80) return 'Fair'
+  return 'Good'
+}
+
+function scoreTone(score: number | null): string {
+  if (score == null) return ''
+  if (score < 40) return 'fill-critical'
+  if (score < 60) return 'fill-high'
+  if (score < 80) return 'fill-medium'
+  return 'fill-low'
+}
+
+function StructuredFindingsBlock({ findings }: { findings: Array<Record<string, unknown>> }) {
+  if (!findings || findings.length === 0) {
+    return (
+      <section className="audit-issue-block">
+        <h4>Findings</h4>
+        <pre>{JSON.stringify(findings, null, 2)}</pre>
+      </section>
+    )
+  }
+
+  return (
+    <section className="audit-issue-block">
+      <h4>Findings ({findings.length})</h4>
+      {findings.map((finding, idx) => (
+        <div key={idx} className="finding-item mb-3 pb-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div className="flex justify-between mb-2">
+            <span className={`audit-priority ${priorityTone(String(finding['severity'] ?? 'low'))}`}>
+              {String(finding['severity'] ?? 'low')}
+            </span>
+            <span className="text-xs text-muted">
+              {String(finding['type'] ?? 'unknown')} / {String(finding['source'] ?? 'unknown')} / confidence {Number(finding['confidence'] ?? 0).toFixed(1)}
+            </span>
+          </div>
+          {finding['operator_note'] ? (
+            <p className="text-sm mb-1"><strong>Note:</strong> {String(finding['operator_note'])}</p>
+          ) : null}
+          {finding['evidence'] ? (
+            <p className="text-xs text-muted">{String(finding['evidence'])}</p>
+          ) : null}
+          {finding['affected_image_indexes'] && Array.isArray(finding['affected_image_indexes']) && (finding['affected_image_indexes'] as number[]).length > 0 ? (
+            <p className="text-xs text-muted mt-1">Image{(finding['affected_image_indexes'] as number[]).length > 1 ? 's' : ''}: {(finding['affected_image_indexes'] as number[]).join(', ')}</p>
+          ) : null}
+        </div>
+      ))}
     </section>
   )
 }

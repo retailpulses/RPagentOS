@@ -1,13 +1,18 @@
-// Review runner — orchestrates the Phase 1 technical/OCR review pipeline.
+// Review runner — orchestrates the technical/OCR review pipeline.
 //
-// Pipeline: snapshot → health check (GET) → OCR → duplicate detection → result.
-// Qwen visual review is deferred to Phase 4. Marketplace scoring starts Phase 2.
+// Phase 1: snapshot → health check → OCR → duplicate detection → result.
+// Phase 2: + marketplace score engine → recommendations → work items.
+// Qwen visual review is deferred to Phase 4.
 
 import { captureSnapshot } from './snapshot-capture.js';
 import { checkImageHealthBatch } from './image-health-check.js';
 import { runOcrForImage, detectOcrKeywords } from './ocr-extraction.js';
 import { detectDuplicates } from './duplicate-detection.js';
+import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
+import { getIssueDefinition } from './issue-taxonomy.js';
+import { createWorkItemsFromReview } from './work-item-factory.js';
 import { supabase } from '../../lib/supabase.js';
+import type { IssueType } from './issue-taxonomy.js';
 import type {
   ReviewPolicy,
   ReviewJob,
@@ -15,6 +20,7 @@ import type {
   ReviewResult,
   SnapshotImage,
   ScoreCompleteness,
+  ScoreEngineInput,
   QualityIssue,
   TechnicalReviewOptions,
   Marketplace,
@@ -23,7 +29,7 @@ import type {
 
 // ─── Scoring version ──────────────────────────────────────────────────────────
 
-const SCORING_VERSION = '1.0.0';
+const SCORING_VERSION = '2.0.0';
 
 // ─── Policy-based listing selection ───────────────────────────────────────────
 
@@ -225,6 +231,34 @@ async function selectListingsForPolicy(
 }
 
 // ─── Issue generation from technical findings ─────────────────────────────────
+//
+// Phase 2: each issue type is registered in the taxonomy (issue-taxonomy.ts).
+// The generation functions look up default severity, source, and operator note
+// from the registry, then override as needed for the specific context.
+
+function makeIssue(
+  type: IssueType,
+  marketplace: Marketplace,
+  overrides: Partial<Pick<QualityIssue, 'severity' | 'confidence' | 'affected_image_indexes' | 'evidence' | 'operator_note' | 'expected_impact'>> & {
+    requires_human_approval?: boolean;
+    suggested_owner?: string | null;
+  },
+): QualityIssue {
+  const def = getIssueDefinition(type);
+  return {
+    type,
+    severity: overrides.severity ?? def.defaultSeverity,
+    confidence: overrides.confidence ?? 1.0,
+    source: def.defaultSource,
+    marketplace,
+    affected_image_indexes: overrides.affected_image_indexes ?? [],
+    evidence: overrides.evidence ?? '',
+    operator_note: overrides.operator_note ?? def.operatorNoteTemplate,
+    requires_human_approval: overrides.requires_human_approval ?? false,
+    suggested_owner: overrides.suggested_owner ?? null,
+    expected_impact: overrides.expected_impact ?? null,
+  };
+}
 
 function generateTechnicalIssues(
   snapshotImages: SnapshotImage[],
@@ -232,45 +266,62 @@ function generateTechnicalIssues(
 ): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
-  // Broken images — use is_main_image flag, not raw position
+  // Broken images
   const broken = snapshotImages.filter((img) => !img.loaded);
   if (broken.length > 0) {
     const mainBroken = broken.some((img) => img.is_main_image);
-    issues.push({
-      type: 'broken_image_url',
+    issues.push(makeIssue('broken_image_url', marketplace, {
       severity: mainBroken ? 'critical' : 'high',
-      confidence: 1.0,
-      source: 'technical',
-      marketplace,
       affected_image_indexes: broken.map((img) => img.image_index),
       evidence: `${broken.length} image(s) failed to load: ${broken.map((img) => img.image_url).join(', ')}`,
       operator_note: mainBroken
         ? 'Main image is broken — listing may not display correctly.'
         : 'Some listing images failed to load.',
-      requires_human_approval: false,
-      suggested_owner: null,
-      expected_impact: 'high',
-    });
+    }));
+
+    // If main image is broken, also flag as missing_main_image
+    if (mainBroken) {
+      issues.push(makeIssue('missing_main_image', marketplace, {
+        severity: 'critical',
+        affected_image_indexes: broken.filter((img) => img.is_main_image).map((img) => img.image_index),
+        evidence: 'Main image failed to load.',
+        operator_note: 'No main image detected. Listing may not display correctly.',
+      }));
+    }
   }
 
-  // Low-resolution images (width < 200 or height < 200 and loaded)
+  // Low-resolution images
   const lowRes = snapshotImages.filter(
-    (img) => img.loaded && img.width !== null && img.height !== null && (img.width < 200 || img.height < 200),
+    (img) => img.loaded && img.width !== null && img.height !== null &&
+      (img.width < 200 || img.height < 200),
   );
   if (lowRes.length > 0) {
-    issues.push({
-      type: 'image_low_resolution',
-      severity: 'medium',
-      confidence: 0.9,
-      source: 'technical',
-      marketplace,
+    issues.push(makeIssue('image_low_resolution', marketplace, {
       affected_image_indexes: lowRes.map((img) => img.image_index),
       evidence: `Images below 200px dimension: ${lowRes.map((img) => `${img.image_index} (${img.width}x${img.height})`).join(', ')}`,
-      operator_note: 'Low resolution images may appear blurry on product pages.',
-      requires_human_approval: false,
-      suggested_owner: null,
-      expected_impact: 'medium',
-    });
+    }));
+  }
+
+  // Weak main image: loaded but low resolution
+  const mainImg = snapshotImages.find((img) => img.is_main_image);
+  if (mainImg && mainImg.loaded && mainImg.width !== null && mainImg.height !== null) {
+    if (mainImg.width < 500 || mainImg.height < 500) {
+      issues.push(makeIssue('weak_main_image', marketplace, {
+        affected_image_indexes: [mainImg.image_index],
+        evidence: `Main image is low resolution: ${mainImg.width}x${mainImg.height}`,
+      }));
+    }
+  }
+
+  // Image count low
+  const loadedCount = snapshotImages.filter((img) => img.loaded).length;
+  if (loadedCount < 3) {
+    issues.push(makeIssue('image_count_low', marketplace, {
+      severity: loadedCount === 0 ? 'critical' : loadedCount === 1 ? 'high' : 'medium',
+      affected_image_indexes: snapshotImages.map((img) => img.image_index),
+      evidence: `Only ${loadedCount} loaded image(s) out of ${snapshotImages.length} total.`,
+      operator_note: `Only ${loadedCount} image(s) — marketplace recommends more. Add more images.`,
+    }));
   }
 
   return issues;
@@ -282,7 +333,6 @@ function generateDuplicateIssues(
 ): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
-  // Build minimal image health result shapes for duplicate detection
   const healthResults = snapshotImages.map((img) => ({
     image_index: img.image_index,
     image_url: img.image_url ?? '',
@@ -299,38 +349,144 @@ function generateDuplicateIssues(
   const { urlDuplicates, contentDuplicates } = detectDuplicates(healthResults);
 
   for (const group of urlDuplicates) {
-    issues.push({
-      type: 'duplicate_url',
-      severity: 'medium',
-      confidence: 1.0,
-      source: 'technical',
-      marketplace,
+    issues.push(makeIssue('duplicate_url', marketplace, {
       affected_image_indexes: group.image_indexes,
       evidence: `Same URL used at positions: ${group.image_indexes.join(', ')}`,
-      operator_note: 'Duplicate image URLs found — remove duplicates or use different images.',
-      requires_human_approval: false,
-      suggested_owner: null,
-      expected_impact: 'medium',
-    });
+    }));
   }
 
   for (const group of contentDuplicates) {
-    issues.push({
-      type: 'duplicate_content',
-      severity: 'low',
-      confidence: 1.0,
-      source: 'technical',
-      marketplace,
+    issues.push(makeIssue('duplicate_content', marketplace, {
       affected_image_indexes: group.image_indexes,
       evidence: `Identical image content at different URLs, positions: ${group.image_indexes.join(', ')}`,
-      operator_note: 'Same image content found at multiple positions — consolidate duplicates.',
-      requires_human_approval: false,
-      suggested_owner: null,
-      expected_impact: 'low',
-    });
+    }));
   }
 
   return issues;
+}
+
+function generateOcrIssues(
+  snapshotImages: SnapshotImage[],
+  marketplace: Marketplace,
+): QualityIssue[] {
+  const issues: QualityIssue[] = [];
+
+  for (const img of snapshotImages) {
+    if (!img.ocr_text || img.ocr_text.length === 0) continue;
+
+    const keywords = detectOcrKeywords(img.ocr_text);
+
+    if (keywords.has_claim_words) {
+      issues.push(makeIssue('forbidden_claims', marketplace, {
+        severity: 'medium',
+        confidence: 0.6,
+        affected_image_indexes: [img.image_index],
+        evidence: `Potentially risky claims detected in image ${img.image_index} OCR text.`,
+        operator_note: 'Listing may contain forbidden claims. Review and remove if confirmed.',
+      }));
+    }
+  }
+
+  return issues;
+}
+
+// ─── Recommendation generation ────────────────────────────────────────────────
+
+interface FixRecommendation {
+  fix_type: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  reason: string;
+  affected_image_indexes: number[];
+  requires_human_approval: boolean;
+}
+
+function generateRecommendations(
+  issues: QualityIssue[],
+  finalScore: number,
+  marketplace: Marketplace,
+): FixRecommendation[] {
+  const recs: FixRecommendation[] = [];
+  const seenTypes = new Set<string>();
+
+  for (const issue of issues) {
+    // One recommendation per unique issue type
+    if (seenTypes.has(issue.type)) continue;
+    seenTypes.add(issue.type);
+
+    const def = getIssueDefinition(issue.type as IssueType);
+
+    switch (def.category) {
+      case 'image_technical':
+        recs.push({
+          fix_type: 'replace_broken_image',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: issue.affected_image_indexes,
+          requires_human_approval: issue.severity === 'critical',
+        });
+        break;
+      case 'image_content':
+        recs.push({
+          fix_type: issue.type === 'image_count_low' ? 'add_lifestyle_image' : 'reorder_images',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: issue.affected_image_indexes,
+          requires_human_approval: false,
+        });
+        break;
+      case 'image_compliance':
+      case 'compliance':
+        recs.push({
+          fix_type: 'human_review',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: issue.affected_image_indexes,
+          requires_human_approval: true,
+        });
+        break;
+      case 'content_quality':
+        recs.push({
+          fix_type: issue.type.includes('title') ? 'rewrite_title' : 'rewrite_description',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: [],
+          requires_human_approval: false,
+        });
+        break;
+      case 'conversion':
+        recs.push({
+          fix_type: issue.type === 'weak_main_image' ? 'replace_weak_main_image' : 'add_lifestyle_image',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: issue.affected_image_indexes,
+          requires_human_approval: false,
+        });
+        break;
+      case 'operational':
+        recs.push({
+          fix_type: 'human_review',
+          priority: issue.severity as FixRecommendation['priority'],
+          reason: issue.evidence,
+          affected_image_indexes: [],
+          requires_human_approval: true,
+        });
+        break;
+    }
+  }
+
+  // If score is critical, always add a human review recommendation
+  if (finalScore < 40) {
+    const grade = scoreToGrade(finalScore, marketplace);
+    recs.push({
+      fix_type: 'human_review',
+      priority: 'critical',
+      reason: `Overall listing quality is ${grade}: score ${finalScore}/100. Manual review recommended.`,
+      affected_image_indexes: [],
+      requires_human_approval: true,
+    });
+  }
+
+  return recs;
 }
 
 // ─── Main review runner ───────────────────────────────────────────────────────
@@ -344,6 +500,7 @@ function generateDuplicateIssues(
 export async function runTechnicalReview(
   listingRef: ListingRef,
   policy: ReviewPolicy,
+  options?: { skipWorkItems?: boolean },
 ): Promise<ReviewRunOutput> {
   const marketplace = listingRef.platform as Marketplace;
 
@@ -468,27 +625,29 @@ export async function runTechnicalReview(
       }
     }
 
-    // 6. Generate technical issues
+    // 6. Generate all issues (technical + duplicate + OCR keyword detection)
     const technicalIssues = generateTechnicalIssues(snapshotImages, marketplace);
     const duplicateIssues = generateDuplicateIssues(snapshotImages, marketplace);
-    const allIssues = [...technicalIssues, ...duplicateIssues];
+    const ocrIssues = generateOcrIssues(snapshotImages, marketplace);
+    const allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues];
 
-    // 7. Compute score completeness
-    const scoreCompleteness: ScoreCompleteness = {
-      technical: true,
-      ocr: ocrSucceeded,
-      marketplace_rules: false,
-      qwen_visual: false,
-      human_review: false,
+    // 7. Compute scores via deterministic score engine
+    const scoreInput: ScoreEngineInput = {
+      snapshotImages,
+      issues: allIssues,
+      marketplace,
+      ocrSucceeded,
+      title: snapshot.title,
+      description: snapshot.description,
+      price: snapshot.price,
     };
+    const scores = computeScores(scoreInput);
 
-    // 8. Calculate a simple technical score (full scoring in Phase 2)
-    const loadedCount = snapshotImages.filter((img) => img.loaded).length;
-    const totalCount = snapshotImages.length;
-    const technicalScore = totalCount > 0 ? Math.round((loadedCount / totalCount) * 100) : 0;
+    // 8. Generate fix recommendations from issues
+    const recommendations = generateRecommendations(allIssues, scores.finalScore, marketplace);
 
-    // 9. Insert review result
-    const reviewCompleteness = ocrSucceeded ? 'technical_ocr' : 'technical_only';
+    // 9. Insert review result with all 6 sub-scores
+    const reviewCompleteness = ocrSucceeded ? 'technical_ocr_marketplace' : 'technical_only';
     const { data: resultRow, error: resultErr } = await supabase
       .from('listing_review_results')
       .insert({
@@ -497,14 +656,19 @@ export async function runTechnicalReview(
         review_type: policy.review_type,
         ocr_engine: 'tesseract',
         scoring_version: SCORING_VERSION,
-        technical_score: technicalScore,
-        final_score: technicalScore,
+        technical_score: scores.technicalScore,
+        content_score: scores.contentScore,
+        image_score: scores.imageScore,
+        compliance_score: scores.complianceScore,
+        conversion_score: scores.conversionScore,
+        operational_risk_score: scores.operationalRiskScore,
+        final_score: scores.finalScore,
         confidence: ocrSucceeded ? 'medium' : 'low',
-        score_status: 'partial',
-        score_completeness_json: scoreCompleteness as unknown as Record<string, unknown>,
+        score_status: scores.scoreStatus,
+        score_completeness_json: scores.scoreCompleteness as unknown as Record<string, unknown>,
         review_completeness: reviewCompleteness,
         issues_json: allIssues as unknown as Record<string, unknown>[],
-        recommendations_json: [],
+        recommendations_json: recommendations as unknown as Record<string, unknown>[],
         raw_outputs_json: {},
       })
       .select('*')
@@ -513,17 +677,46 @@ export async function runTechnicalReview(
     if (resultErr) throw new Error(`Insert result: ${resultErr.message}`);
     const result = resultRow as unknown as ReviewResult;
 
-    // 10. Mark job completed
+    // 10. Create/update work item from review result (Phase 2)
+    let workItemResult: { created: number; updated: number; skipped: number; errors: number; errorMessages: string[] } = {
+      created: 0, updated: 0, skipped: 0, errors: 0, errorMessages: [],
+    };
+
+    if (options?.skipWorkItems) {
+      // Skipped by explicit flag — not an error
+    } else {
+      workItemResult = await createWorkItemsFromReview(result, snapshot);
+      if (workItemResult.errors > 0) {
+        console.error(
+          `Work item errors: ${workItemResult.errorMessages.join('; ')}`,
+        );
+      }
+    }
+
+    // 11. Mark job completed (with work item error note if applicable)
+    const jobUpdate: Record<string, unknown> = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (workItemResult.errors > 0) {
+      jobUpdate.error_message = `Work item creation had ${workItemResult.errors} error(s): ${workItemResult.errorMessages.join('; ')}`;
+    }
+
     await supabase
       .from('listing_review_jobs')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      .update(jobUpdate)
       .eq('id', job.id);
 
-    return { snapshot, snapshotImages, result, job: { ...job, status: 'completed', completed_at: new Date().toISOString() } };
+    return {
+      snapshot,
+      snapshotImages,
+      result,
+      job: { ...job, ...jobUpdate } as ReviewJob,
+      workItemsCreated: workItemResult.created + workItemResult.updated,
+      workItemErrors: workItemResult.errors,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
@@ -548,6 +741,10 @@ export interface PolicyReviewResult {
   reviewed: number;
   skipped: number;
   errors: number;
+  /** Total work items created/updated across all reviewed listings (Phase 2). */
+  workItemsCreated: number;
+  /** Unexpcted work item creation errors (should exit nonzero). */
+  workItemErrors: number;
 }
 
 /**
@@ -581,7 +778,9 @@ export async function runPolicyReview(
     }
 
     try {
-      const output = await runTechnicalReview(listing, policy);
+      const output = await runTechnicalReview(listing, policy, {
+        skipWorkItems: options.skipWorkItems,
+      });
       outputs.push(output);
 
       if (output.skipped) {
@@ -602,5 +801,14 @@ export async function runPolicyReview(
     }
   }
 
-  return { outputs, reviewed: outputs.filter(o => !o.skipped).length, skipped, errors };
+  const workItemsCreated = outputs.reduce((sum, o) => sum + (o.workItemsCreated ?? 0), 0);
+  const workItemErrors = outputs.reduce((sum, o) => sum + (o.workItemErrors ?? 0), 0);
+  return {
+    outputs,
+    reviewed: outputs.filter(o => !o.skipped).length,
+    skipped,
+    errors,
+    workItemsCreated,
+    workItemErrors,
+  };
 }
