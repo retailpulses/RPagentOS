@@ -149,6 +149,13 @@ export interface ReviewResult {
   review_completeness: ReviewCompleteness | null;
   issues_json: QualityIssue[];
   recommendations_json: FixRecommendation[];
+  /**
+   * Raw outputs from processing steps.
+   * Phase 3: `qwen_review` — synchronous Qwen raw output if qwen_enabled.
+   * Phase 4: `qwen_review_request_id` — async Qwen request UUID set by
+   * enqueueQwenReview(). The apply-qwen-findings CLI reads this to trace
+   * back from the review result to the completed Qwen review.
+   */
   raw_outputs_json: Record<string, unknown>;
   created_at: string;
 }
@@ -278,6 +285,12 @@ export interface ReviewRunOutput {
   cycle_id?: string;
   /** Score delta from baseline when this is a re-review (Phase 3). */
   scoreDelta?: number;
+  /**
+   * Qwen review request ID (Phase 4). Set when Qwen is enqueued asynchronously.
+   * Stored in raw_outputs_json.qwen_review_request_id for traceability and
+   * queried by apply-qwen-findings CLI job.
+   */
+  qwenReviewRequestId?: string;
 }
 
 // ─── Job Options ──────────────────────────────────────────────────────────────
