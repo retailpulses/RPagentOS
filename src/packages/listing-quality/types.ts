@@ -286,6 +286,8 @@ export interface TechnicalReviewOptions {
   verbose: boolean;
   /** Skip work item creation after review (Phase 2). */
   skipWorkItems?: boolean;
+  /** Skip Qwen visual review (Phase 3). */
+  skipQwen?: boolean;
 }
 
 // ─── Phase 2 Score Engine ───────────────────────────────────────────────────
@@ -296,6 +298,8 @@ export interface ScoreEngineInput {
   issues: QualityIssue[];
   marketplace: Marketplace;
   ocrSucceeded: boolean;
+  /** Whether the Qwen visual review step completed successfully. */
+  qwenSucceeded?: boolean;
   title: string | null;
   description: string | null;
   price: number | null;
