@@ -10,6 +10,7 @@
  *   --confirm     Required for actual execution
  *   --limit N     Max listings to review (default 50)
  *   --platform    Filter to specific marketplace (amazon|rakuten|mercari)
+ *   --skip-qwen    Skip Qwen visual review even if policy enables it
  *   --policy-id   Run a specific policy by ID
  *   --verbose     Detailed progress output
  *   --skip-work-items  Skip work item creation (Phase 2)

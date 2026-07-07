@@ -2,7 +2,7 @@
 //
 // Phase 1: snapshot → health check → OCR → duplicate detection → result.
 // Phase 2: + marketplace score engine → recommendations → work items.
-// Qwen visual review is deferred to Phase 4.
+// Marketplace compliance rules (Phase 4 per design spec) added in feature/marketplace-compliance-rules.
 
 import { captureSnapshot } from './snapshot-capture.js';
 import { checkImageHealthBatch } from './image-health-check.js';
@@ -11,6 +11,7 @@ import { detectDuplicates } from './duplicate-detection.js';
 import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
 import { getIssueDefinition } from './issue-taxonomy.js';
 import { createWorkItemsFromReview } from './work-item-factory.js';
+import { runMarketplaceRules, buildOcrTextIndex } from './marketplace-rules.js';
 import { supabase } from '../../lib/supabase.js';
 import type { IssueType } from './issue-taxonomy.js';
 import type {
@@ -18,6 +19,7 @@ import type {
   ReviewJob,
   ReviewRunOutput,
   ReviewResult,
+  ReviewSnapshot,
   SnapshotImage,
   ScoreCompleteness,
   ScoreEngineInput,
@@ -500,7 +502,7 @@ function generateRecommendations(
 export async function runTechnicalReview(
   listingRef: ListingRef,
   policy: ReviewPolicy,
-  options?: { skipWorkItems?: boolean },
+  options?: { skipWorkItems?: boolean; verbose?: boolean },
 ): Promise<ReviewRunOutput> {
   const marketplace = listingRef.platform as Marketplace;
 
@@ -629,7 +631,17 @@ export async function runTechnicalReview(
     const technicalIssues = generateTechnicalIssues(snapshotImages, marketplace);
     const duplicateIssues = generateDuplicateIssues(snapshotImages, marketplace);
     const ocrIssues = generateOcrIssues(snapshotImages, marketplace);
-    const allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues];
+    let allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues];
+
+    // 6b. Run marketplace compliance rules (Phase 4)
+    const ocrTextByIndex = buildOcrTextIndex(snapshotImages);
+    const marketplaceRuleOutput = runMarketplaceRules(
+      marketplace,
+      snapshot as ReviewSnapshot,
+      snapshotImages,
+      ocrTextByIndex,
+    );
+    allIssues = [...allIssues, ...marketplaceRuleOutput.issues];
 
     // 7. Compute scores via deterministic score engine
     const scoreInput: ScoreEngineInput = {
@@ -669,7 +681,13 @@ export async function runTechnicalReview(
         review_completeness: reviewCompleteness,
         issues_json: allIssues as unknown as Record<string, unknown>[],
         recommendations_json: recommendations as unknown as Record<string, unknown>[],
-        raw_outputs_json: {},
+        raw_outputs_json: {
+          marketplace_rules: {
+            rulesChecked: marketplaceRuleOutput.rulesChecked,
+            rulesPassed: marketplaceRuleOutput.rulesPassed,
+            violations: marketplaceRuleOutput.violations,
+          },
+        },
       })
       .select('*')
       .single();
@@ -780,6 +798,7 @@ export async function runPolicyReview(
     try {
       const output = await runTechnicalReview(listing, policy, {
         skipWorkItems: options.skipWorkItems,
+        verbose: options.verbose,
       });
       outputs.push(output);
 

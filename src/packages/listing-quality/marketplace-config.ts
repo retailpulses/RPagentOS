@@ -46,6 +46,8 @@ export interface MarketplaceScoreConfig {
   weights: MarketplaceScoreWeights;
   thresholds: MarketplaceThresholds;
   imageRequirements: MarketplaceImageRequirements;
+  /** Rule IDs enabled for this marketplace (Phase 4). */
+  rules: string[];
 }
 
 // ─── Marketplace Configs ────────────────────────────────────────────────────
@@ -70,6 +72,15 @@ const AMAZON_CONFIG: MarketplaceScoreConfig = {
     recommendedImageCount: 7,
     minDimension: 500,
   },
+  rules: [
+    'amazon_main_image_white_bg',
+    'amazon_main_image_no_text',
+    'amazon_main_image_min_1600px',
+    'amazon_image_count_6plus',
+    'amazon_title_format',
+    'amazon_bullet_points_count',
+    'amazon_prohibited_claims',
+  ],
 };
 
 const RAKUTEN_CONFIG: MarketplaceScoreConfig = {
@@ -92,6 +103,13 @@ const RAKUTEN_CONFIG: MarketplaceScoreConfig = {
     recommendedImageCount: 10,
     minDimension: 300,
   },
+  rules: [
+    'rakuten_image_count_5plus',
+    'rakuten_no_price_in_image',
+    'rakuten_category_fields',
+    'rakuten_title_length',
+    'rakuten_description_min_200',
+  ],
 };
 
 const MERCARI_CONFIG: MarketplaceScoreConfig = {
@@ -114,6 +132,13 @@ const MERCARI_CONFIG: MarketplaceScoreConfig = {
     recommendedImageCount: 10,
     minDimension: 300,
   },
+  rules: [
+    'mercari_image_count_3plus',
+    'mercari_no_external_links',
+    'mercari_used_item_condition_photo',
+    'mercari_shipping_info',
+    'mercari_title_brand_model',
+  ],
 };
 
 const CONFIG_BY_MARKETPLACE: Record<Marketplace, MarketplaceScoreConfig> = {
@@ -142,6 +167,16 @@ export function getThresholds(marketplace: Marketplace): MarketplaceThresholds {
 
 export function getImageRequirements(marketplace: Marketplace): MarketplaceImageRequirements {
   return getMarketplaceConfig(marketplace).imageRequirements;
+}
+
+/**
+ * Get the list of enabled marketplace compliance rule IDs for a marketplace.
+ * Falls back to an empty array if no rules are configured.
+ */
+export function getEnabledRules(marketplace: Marketplace): string[] {
+  const config = CONFIG_BY_MARKETPLACE[marketplace];
+  if (!config) return [];
+  return config.rules ?? [];
 }
 
 /**

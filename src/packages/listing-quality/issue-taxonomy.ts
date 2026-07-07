@@ -25,6 +25,8 @@ export const ISSUE_CATEGORIES = {
     'image_text_overlay',
     'image_watermark',
     'image_size_noncompliant',
+    'non_white_background',
+    'main_image_text_overlay',
   ],
   content_quality: [
     'title_too_short',
@@ -33,17 +35,24 @@ export const ISSUE_CATEGORIES = {
     'description_too_short',
     'missing_dimensions',
     'missing_material',
+    'title_format_noncompliant',
+    'shipping_info_missing',
   ],
   compliance: [
     'missing_required_fields',
     'forbidden_claims',
     'category_mismatch',
+    'prohibited_claims_detected',
+    'missing_category_fields',
+    'external_link_in_description',
+    'bullet_points_insufficient',
   ],
   conversion: [
     'weak_main_image',
     'no_lifestyle_image',
     'no_scale_reference',
     'no_detail_closeup',
+    'used_item_no_condition_photo',
   ],
   operational: [
     'price_anomaly',
@@ -172,6 +181,22 @@ const REGISTRY: Record<IssueType, IssueDefinition> = {
     operatorNoteTemplate: 'Image at position {pos} ({w}x{h}) does not meet size requirements.',
     affectsScores: ['compliance', 'technical'],
   },
+  non_white_background: {
+    type: 'non_white_background',
+    category: 'image_compliance',
+    defaultSeverity: 'high',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Main image background may not be pure white. Amazon requires white background for main image.',
+    affectsScores: ['compliance'],
+  },
+  main_image_text_overlay: {
+    type: 'main_image_text_overlay',
+    category: 'image_compliance',
+    defaultSeverity: 'high',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Main image contains text or graphics overlay — may violate main image guidelines.',
+    affectsScores: ['compliance'],
+  },
 
   // ── content_quality ──
   title_too_short: {
@@ -222,6 +247,22 @@ const REGISTRY: Record<IssueType, IssueDefinition> = {
     operatorNoteTemplate: 'No material information found. Add material/spec details.',
     affectsScores: ['content'],
   },
+  title_format_noncompliant: {
+    type: 'title_format_noncompliant',
+    category: 'content_quality',
+    defaultSeverity: 'medium',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Title format may not follow marketplace guidelines. Include brand + product name pattern.',
+    affectsScores: ['content', 'conversion'],
+  },
+  shipping_info_missing: {
+    type: 'shipping_info_missing',
+    category: 'content_quality',
+    defaultSeverity: 'low',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Description does not mention shipping method or delivery time. Consider adding shipping info.',
+    affectsScores: ['content'],
+  },
 
   // ── compliance ──
   missing_required_fields: {
@@ -247,6 +288,38 @@ const REGISTRY: Record<IssueType, IssueDefinition> = {
     defaultSource: 'marketplace_rule',
     operatorNoteTemplate: 'Product category may not match listing content. Verify categorization.',
     affectsScores: ['compliance', 'conversion'],
+  },
+  prohibited_claims_detected: {
+    type: 'prohibited_claims_detected',
+    category: 'compliance',
+    defaultSeverity: 'high',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Title or description may contain prohibited claims or phrases: {phrases}. Review and remove.',
+    affectsScores: ['compliance', 'operationalRisk'],
+  },
+  missing_category_fields: {
+    type: 'missing_category_fields',
+    category: 'compliance',
+    defaultSeverity: 'medium',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Missing category-specific required fields: {fields}. Complete before publish.',
+    affectsScores: ['compliance'],
+  },
+  external_link_in_description: {
+    type: 'external_link_in_description',
+    category: 'compliance',
+    defaultSeverity: 'high',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Description contains external URL(s). Remove or convert to allowed format.',
+    affectsScores: ['compliance', 'operationalRisk'],
+  },
+  bullet_points_insufficient: {
+    type: 'bullet_points_insufficient',
+    category: 'compliance',
+    defaultSeverity: 'medium',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Only {count} bullet point(s) provided. Marketplace recommends {expected} bullet points.',
+    affectsScores: ['compliance', 'content'],
   },
 
   // ── conversion ──
@@ -281,6 +354,14 @@ const REGISTRY: Record<IssueType, IssueDefinition> = {
     defaultSource: 'ocr',
     operatorNoteTemplate: 'No detail/closeup image found. Add zoomed-in detail shots.',
     affectsScores: ['conversion'],
+  },
+  used_item_no_condition_photo: {
+    type: 'used_item_no_condition_photo',
+    category: 'conversion',
+    defaultSeverity: 'medium',
+    defaultSource: 'marketplace_rule',
+    operatorNoteTemplate: 'Listing is for used/中古 item but lacks sufficient condition photos. Add close-up shots showing actual condition.',
+    affectsScores: ['conversion', 'compliance'],
   },
 
   // ── operational ──
