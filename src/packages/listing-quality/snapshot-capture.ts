@@ -112,6 +112,8 @@ export interface CaptureOutput {
   images: SnapshotImage[];
   /** True if this snapshot already existed (idempotent hit). */
   isExisting: boolean;
+  /** True when a new snapshot was created (data changed since last capture). */
+  hasChanged: boolean;
 }
 
 /**
@@ -152,7 +154,7 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     // Return existing snapshot + images (idempotent — same source_hash)
     const snapshotId = (existing[0] as { id: string }).id;
     const loaded = await loadExistingSnapshot(snapshotId);
-    return { ...loaded, isExisting: true };
+    return { ...loaded, isExisting: true, hasChanged: false };
   }
 
   // Insert snapshot
@@ -207,7 +209,7 @@ export async function captureSnapshot(input: CaptureInput): Promise<CaptureOutpu
     snapshotImages.push(imgRow as unknown as SnapshotImage);
   }
 
-  return { snapshot, images: snapshotImages, isExisting: false };
+  return { snapshot, images: snapshotImages, isExisting: false, hasChanged: true };
 }
 
 /**
@@ -234,5 +236,6 @@ async function loadExistingSnapshot(snapshotId: string): Promise<CaptureOutput> 
     snapshot: snap as unknown as ReviewSnapshot,
     images: (imgs ?? []) as unknown as SnapshotImage[],
     isExisting: true,
+    hasChanged: false,
   };
 }

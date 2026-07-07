@@ -274,6 +274,10 @@ export interface ReviewRunOutput {
   workItemsCreated?: number;
   /** Number of work item creation errors (Phase 2). */
   workItemErrors?: number;
+  /** Cycle ID when this review was part of a re-review cycle (Phase 3). */
+  cycle_id?: string;
+  /** Score delta from baseline when this is a re-review (Phase 3). */
+  scoreDelta?: number;
 }
 
 // ─── Job Options ──────────────────────────────────────────────────────────────

@@ -395,3 +395,150 @@ export function useRunQwenReview() {
 
   return { run, loading, error }
 }
+
+// ─── Phase 3: Listing Quality Cycle ──────────────────────────────────────────
+
+export interface ListingCycleState {
+  id: string
+  listing_id: string
+  marketplace: string
+  cycle_status: string
+  baseline_score: number | null
+  latest_score: number | null
+  score_delta: number | null
+  created_from: string | null
+  human_owner: string | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Fetch the latest quality cycle for a listing.
+ * Returns null if no cycle exists or Supabase is unavailable.
+ */
+export function useLatestCycle(listingId: string | null | undefined) {
+  const [data, setData] = useState<ListingCycleState | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetch = useCallback(async () => {
+    if (!listingId || !supabase) {
+      setData(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const { data: rows, error: queryError } = await supabase
+        .from('listing_quality_cycles')
+        .select('*')
+        .eq('listing_id', listingId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (queryError) throw queryError
+      setData((rows?.[0] as ListingCycleState | undefined) ?? null)
+    } catch (e: unknown) {
+      setData(null)
+      setError(e instanceof Error ? e.message : 'Failed to load cycle')
+    } finally {
+      setLoading(false)
+    }
+  }, [listingId])
+
+  useEffect(() => { void fetch() }, [fetch])
+
+  return { data, loading, error, refetch: fetch }
+}
+
+/**
+ * Enqueue a re-review for a listing.
+ * Creates a review_job with trigger_source='event' and creates/updates
+ * a quality cycle for the listing.
+ */
+export function useEnqueueReReview() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const enqueue = async (listingId: string, platform: string): Promise<{ ok: boolean; error?: string; jobId?: string }> => {
+    if (!supabase) {
+      setError('Listing workbench is not connected.')
+      return { ok: false, error: 'Listing workbench is not connected.' }
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      // 1. Get or create a quality cycle for this listing
+      const marketplace = platform === 'amazon' ? 'amazon' : platform === 'rakuten' ? 'rakuten' : 'mercari'
+
+      const { data: existingCycles } = await supabase
+        .from('listing_quality_cycles')
+        .select('*')
+        .eq('listing_id', listingId)
+        .in('cycle_status', [
+          'not_reviewed', 'review_queued', 'reviewed', 'fix_needed',
+          'fix_in_progress', 'fix_ready_for_review', 're_review_queued', 'improved',
+        ])
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      let cycleId: string
+
+      if (existingCycles && existingCycles.length > 0) {
+        cycleId = existingCycles[0].id
+      } else {
+        const { data: newCycle, error: createErr } = await supabase
+          .from('listing_quality_cycles')
+          .insert({
+            listing_id: listingId,
+            marketplace,
+            cycle_status: 're_review_queued',
+            created_from: 'manual_request',
+          })
+          .select('id')
+          .single()
+
+        if (createErr) throw createErr
+        cycleId = newCycle.id
+      }
+
+      // 2. Enqueue the review job
+      const { data: job, error: jobErr } = await supabase
+        .from('listing_review_jobs')
+        .insert({
+          cycle_id: cycleId,
+          trigger_source: 'event',
+          marketplace,
+          review_type: 'event_triggered',
+          status: 'queued',
+          priority: 100,
+          attempt_count: 0,
+          max_attempts: 3,
+          requested_by: 'listing_workbench:re-review',
+        })
+        .select('id')
+        .single()
+
+      if (jobErr) throw jobErr
+
+      // 3. Update cycle status
+      await supabase
+        .from('listing_quality_cycles')
+        .update({ cycle_status: 're_review_queued', updated_at: new Date().toISOString() })
+        .eq('id', cycleId)
+
+      return { ok: true, jobId: job.id }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to enqueue re-review'
+      setError(message)
+      return { ok: false, error: message }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return { enqueue, loading, error }
+}

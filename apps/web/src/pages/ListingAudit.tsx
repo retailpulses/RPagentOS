@@ -4,6 +4,7 @@ import {
   type ListingQwenReview,
   type ListingWorkItemFilters,
   type ListingReviewResult,
+  type ListingCycleState,
   useLatestQwenReview,
   useListingReviewResult,
   useListingWorkItemOptions,
@@ -12,6 +13,7 @@ import {
   useUpdateListingWorkItemStatus,
 } from '../hooks/useListingWorkItems'
 import { useCreateTask, useLinkTarget } from '../hooks/useTasks'
+import { useEnqueueReReview, useLatestCycle } from '../hooks/useListingWorkItems'
 
 const EMPTY_FILTERS: ListingWorkItemFilters = {}
 
@@ -33,6 +35,8 @@ export default function ListingAudit() {
 
   const qualityResult = useListingReviewResult(selected?.latest_result_id)
   const qwenReview = useLatestQwenReview(selected?.id)
+  const cycle = useLatestCycle(selected?.listing_id)
+  const reReview = useEnqueueReReview()
 
   const summary = useMemo(() => {
     return {
@@ -113,6 +117,20 @@ export default function ListingAudit() {
     window.setTimeout(() => { void qwenReview.refetch() }, 10000)
   }
 
+  const handleReReview = async (item: ListingWorkItem) => {
+    setActionError(null)
+    if (!item.listing_id) {
+      setActionError('No listing ID available for this work item')
+      return
+    }
+    const result = await reReview.enqueue(item.listing_id, item.platform ?? 'mercari')
+    if (!result.ok) {
+      setActionError(result.error ?? 'Failed to enqueue re-review')
+      return
+    }
+    await cycle.refetch()
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -179,11 +197,13 @@ export default function ListingAudit() {
             reviewLoading={qwenReview.loading}
             qualityResult={qualityResult.data}
             qualityLoading={qualityResult.loading}
-            busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading}
+            busy={statusUpdate.loading || createTask.loading || linkTarget.loading || qwenRunner.loading || reReview.loading}
+            cycleState={cycle.data}
             onIgnore={() => void handleStatus(selected, 'ignored')}
             onWaitingInput={() => void handleStatus(selected, 'waiting_for_input')}
             onCreateTask={() => void handleCreateTask(selected)}
             onRunQwenReview={() => void handleRunQwenReview(selected)}
+            onReReview={() => void handleReReview(selected)}
           />
         )}
       </div>
@@ -218,17 +238,19 @@ function FilterSelect({ label, value, options, formatOption, onChange }: {
   )
 }
 
-function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoading, busy, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview }: {
+function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoading, busy, cycleState, onIgnore, onWaitingInput, onCreateTask, onRunQwenReview, onReReview }: {
   item: ListingWorkItem
   review: ListingQwenReview | null
   reviewLoading: boolean
   qualityResult: ListingReviewResult | null
   qualityLoading: boolean
   busy: boolean
+  cycleState: ListingCycleState | null
   onIgnore: () => void
   onWaitingInput: () => void
   onCreateTask: () => void
   onRunQwenReview: () => void
+  onReReview: () => void
 }) {
   const qwenEligible = isQwenEligible(item)
   return (
@@ -238,7 +260,14 @@ function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoa
           <h3>{targetLabel(item)}</h3>
           <p className="text-xs text-muted">{item.platform ?? 'all platforms'} / {shopLabel(item.shop_code)} / {item.target_type}</p>
         </div>
-        <div className="audit-score">{Math.round(item.priority_score)}</div>
+        <div className="flex items-center gap-2">
+          {cycleState && (
+            <span className={`cycle-badge ${cycleTone(cycleState.cycle_status)}`}>
+              {cycleState.cycle_status.replace(/_/g, ' ')}
+            </span>
+          )}
+          <div className="audit-score">{Math.round(item.priority_score)}</div>
+        </div>
       </div>
 
       <div className="audit-recommendation mb-4">
@@ -252,7 +281,9 @@ function WorkItemDetail({ item, review, reviewLoading, qualityResult, qualityLoa
         <button className="btn" disabled={busy} onClick={onWaitingInput}>Mark Waiting Input</button>
         <button className="btn btn-primary" disabled={busy} onClick={onCreateTask}>Create Task</button>
         <button className="btn" disabled={busy || !qwenEligible} onClick={onRunQwenReview}>Run Qwen Review</button>
+        <button className="btn" disabled={busy || !item.listing_id} onClick={onReReview}>Re-review</button>
       </div>
+      {!item.listing_id && <p className="text-xs text-muted mt-2">Re-review requires a linked listing.</p>}
       {!qwenEligible && <p className="text-xs text-muted mt-2">Qwen runs only for mapped Rakuten/Amazon/Mercari audit items.</p>}
 
       <QualityScoreBlock result={qualityResult} loading={qualityLoading} />
@@ -481,6 +512,13 @@ function StructuredFindingsBlock({ findings }: { findings: Array<Record<string, 
 function priorityTone(value: string) {
   if (value === 'critical' || value === 'high') return 'high'
   if (value === 'medium') return 'medium'
+  return 'low'
+}
+
+function cycleTone(status: string) {
+  if (status === 'approved' || status === 'published' || status === 'improved') return 'low'
+  if (status === 'fix_needed' || status === 'rejected') return 'high'
+  if (status === 'fix_in_progress' || status === 're_review_queued' || status === 'review_queued') return 'medium'
   return 'low'
 }
 
