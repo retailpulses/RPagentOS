@@ -12,6 +12,7 @@ import { detectDuplicates } from './duplicate-detection.js';
 import { computeScores, scoreToGrade, gradeLabel } from './score-engine.js';
 import { getIssueDefinition } from './issue-taxonomy.js';
 import { createWorkItemsFromReview } from './work-item-factory.js';
+import { runMarketplaceRules, buildOcrTextIndex } from './marketplace-rules.js';
 import { supabase } from '../../lib/supabase.js';
 import type { IssueType } from './issue-taxonomy.js';
 import type {
@@ -19,6 +20,7 @@ import type {
   ReviewJob,
   ReviewRunOutput,
   ReviewResult,
+  ReviewSnapshot,
   SnapshotImage,
   ScoreCompleteness,
   ScoreEngineInput,
@@ -660,7 +662,17 @@ export async function runTechnicalReview(
     const technicalIssues = generateTechnicalIssues(snapshotImages, marketplace);
     const duplicateIssues = generateDuplicateIssues(snapshotImages, marketplace);
     const ocrIssues = generateOcrIssues(snapshotImages, marketplace);
-    const allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues, ...qwenIssues];
+    let allIssues = [...technicalIssues, ...duplicateIssues, ...ocrIssues, ...qwenIssues];
+
+    // 6b. Run marketplace compliance rules (Phase 4)
+    const ocrTextByIndex = buildOcrTextIndex(snapshotImages);
+    const marketplaceRuleOutput = runMarketplaceRules(
+      marketplace,
+      snapshot as ReviewSnapshot,
+      snapshotImages,
+      ocrTextByIndex,
+    );
+    allIssues = [...allIssues, ...marketplaceRuleOutput.issues];
 
     // 7. Compute scores via deterministic score engine
     const scoreInput: ScoreEngineInput = {
@@ -701,7 +713,14 @@ export async function runTechnicalReview(
         review_completeness: reviewCompleteness,
         issues_json: allIssues as unknown as Record<string, unknown>[],
         recommendations_json: recommendations as unknown as Record<string, unknown>[],
-        raw_outputs_json: (() => { const ro: Record<string, unknown> = {}; if (qwenRawOutput) ro["qwen_review"] = qwenRawOutput; return ro; })(),
+        raw_outputs_json: {
+          ...(qwenRawOutput ? { qwen_review: qwenRawOutput } : {}),
+          marketplace_rules: {
+            rulesChecked: marketplaceRuleOutput.rulesChecked,
+            rulesPassed: marketplaceRuleOutput.rulesPassed,
+            violations: marketplaceRuleOutput.violations,
+          },
+        },
       })
       .select('*')
       .single();

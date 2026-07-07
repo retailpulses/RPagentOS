@@ -361,7 +361,7 @@ export interface MarketplaceComplianceRule {
   /** Which marketplace this rule applies to. */
   marketplace: Marketplace;
   /** Category this rule falls under. */
-  category: 'image_compliance' | 'content_quality' | 'compliance' | 'operational';
+  category: 'image_compliance' | 'content_quality' | 'compliance' | 'conversion' | 'operational';
   /** Issue type emitted when this rule is violated (must exist in taxonomy). */
   issueType: string;
   /** Default severity when violated. */
