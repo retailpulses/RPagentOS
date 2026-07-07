@@ -286,6 +286,8 @@ export interface TechnicalReviewOptions {
   verbose: boolean;
   /** Skip work item creation after review (Phase 2). */
   skipWorkItems?: boolean;
+  /** Skip Qwen visual review (Phase 3). */
+  skipQwen?: boolean;
 }
 
 // ─── Phase 2 Score Engine ───────────────────────────────────────────────────
@@ -296,6 +298,8 @@ export interface ScoreEngineInput {
   issues: QualityIssue[];
   marketplace: Marketplace;
   ocrSucceeded: boolean;
+  /** Whether the Qwen visual review step completed successfully. */
+  qwenSucceeded?: boolean;
   title: string | null;
   description: string | null;
   price: number | null;
@@ -393,4 +397,50 @@ export interface MarketplaceRuleRunOutput {
   violations: MarketplaceRuleResult[];
   /** All issues extracted from violations (ready to merge into review). */
   issues: QualityIssue[];
+}
+
+// ─── Phase 3: Event-Triggered Re-review ──────────────────────────────────
+// Per listing-quality-engineering-image-mvp-design.md § Phase 3.
+
+/** Status lifecycle for a listing quality improvement cycle. */
+export type CycleStatus =
+  | 'not_reviewed'
+  | 'review_queued'
+  | 'reviewed'
+  | 'fix_needed'
+  | 'fix_in_progress'
+  | 'fix_ready_for_review'
+  | 're_review_queued'
+  | 'improved'
+  | 'approved'
+  | 'published'
+  | 'rejected'
+  | 'deferred';
+
+/** What triggered a re-review. */
+export type ReReviewTriggerSource =
+  | 'image_change'
+  | 'title_change'
+  | 'description_change'
+  | 'product_facts_change'
+  | 'work_item_completed'
+  | 'new_listing_imported'
+  | 'hero_promotion'
+  | 'manual_request';
+
+/** Tracks one improvement loop for a listing across review → fix → re-review. */
+export interface ListingQualityCycle {
+  id: string;
+  listing_id: string;
+  marketplace: Marketplace;
+  cycle_status: CycleStatus;
+  baseline_snapshot_id: string | null;
+  latest_snapshot_id: string | null;
+  baseline_score: number | null;
+  latest_score: number | null;
+  score_delta: number | null;
+  created_from: ReReviewTriggerSource | null;
+  human_owner: string | null;
+  created_at: string;
+  updated_at: string;
 }
