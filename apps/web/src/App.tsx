@@ -2,8 +2,10 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import ListingAudit from './pages/ListingAudit'
+import '@retailpulses/tickets/styles/tickets.css'
 
 const Today = lazy(() => import('./pages/Today'))
+const TicketReportViewer = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketReportViewer })))
 const Board = lazy(() => import('./pages/Board'))
 const CreateTask = lazy(() => import('./pages/CreateTask'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
@@ -19,6 +21,7 @@ export default function App() {
           <Route path="/board" element={<Board />} />
           <Route path="/task/board" element={<Board />} />
           <Route path="/listing" element={<ListingAudit />} />
+          <Route path="/tickets/reports" element={<TicketReportViewer />} />
           <Route path="/listing-audit" element={<Navigate to="/listing" replace />} />
           <Route path="/task/new" element={<CreateTask />} />
           <Route path="/tasks/new" element={<CreateTask />} />

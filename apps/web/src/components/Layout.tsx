@@ -16,6 +16,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/listing" className={({ isActive }) => isActive ? 'active' : ''}>
             Listing Audit
           </NavLink>
+          <NavLink to="/tickets/reports" className={({ isActive }) => isActive ? 'active' : ''}>
+            Tickets
+          </NavLink>
           <NavLink to="/task/new" className={({ isActive }) => isActive ? 'active' : ''}>
             + New Task
           </NavLink>
