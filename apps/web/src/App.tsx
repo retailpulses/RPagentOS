@@ -7,6 +7,7 @@ import '@retailpulses/tickets/styles/tickets.css'
 const Today = lazy(() => import('./pages/Today'))
 const TicketWorkspace = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketWorkspace })))
 const TicketReportViewer = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketReportViewer })))
+const TicketPromptManager = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketPromptManager })))
 const Board = lazy(() => import('./pages/Board'))
 const CreateTask = lazy(() => import('./pages/CreateTask'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/listing" element={<ListingAudit />} />
           <Route path="/tickets" element={<TicketWorkspace />} />
           <Route path="/tickets/reports" element={<TicketReportViewer />} />
+          <Route path="/tickets/prompts" element={<TicketPromptManager />} />
           <Route path="/listing-audit" element={<Navigate to="/listing" replace />} />
           <Route path="/task/new" element={<CreateTask />} />
           <Route path="/tasks/new" element={<CreateTask />} />
