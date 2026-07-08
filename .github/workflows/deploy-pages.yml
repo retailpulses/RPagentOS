@@ -10,10 +10,28 @@ permissions:
   contents: read
   deployments: write
 
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: false
+
 jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Production branch guard
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Production deploy only allowed from main branch."
+            exit 1
+          fi
+          echo "✅ Production deploy from main — proceeding."
+
   deploy:
     name: Build and deploy web app
     runs-on: ubuntu-latest
+    needs: gate
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,3 +66,44 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/web/dist --project-name rpagentos --branch main
+
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always() && needs.deploy.result != 'skipped'
+    steps:
+      - name: Health check
+        run: |
+          URL="https://rpagentos.pages.dev"
+          echo "Smoke testing: $URL"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$URL" || echo "000")
+            case "$STATUS" in
+              200) echo "✅ Healthy (HTTP 200)"; exit 0 ;;
+              301|302|307|308) echo "✅ Alive (HTTP $STATUS redirect)"; exit 0 ;;
+              401|403) echo "✅ Alive behind gate (HTTP $STATUS)"; exit 0 ;;
+              404) echo "⚠️  HTTP 404 (attempt $i/5)" ;;
+              *)   echo "⏳ HTTP $STATUS — retrying (attempt $i/5)" ;;
+            esac
+            sleep 5
+          done
+          echo "❌ Smoke test FAILED after 5 attempts"
+          exit 1
+
+  summary:
+    name: Summary
+    runs-on: ubuntu-latest
+    needs: [gate, deploy, smoke]
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          echo "### Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repository | \`${{ github.repository }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ref | \`${{ github.ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy status | ${{ needs.deploy.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Smoke status | ${{ needs.smoke.result }} |" >> "$GITHUB_STEP_SUMMARY"
