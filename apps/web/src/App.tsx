@@ -5,6 +5,7 @@ import ListingAudit from './pages/ListingAudit'
 import '@retailpulses/tickets/styles/tickets.css'
 
 const Today = lazy(() => import('./pages/Today'))
+const TicketWorkspace = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketWorkspace })))
 const TicketReportViewer = lazy(() => import("@retailpulses/tickets").then(m => ({ default: m.TicketReportViewer })))
 const Board = lazy(() => import('./pages/Board'))
 const CreateTask = lazy(() => import('./pages/CreateTask'))
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/board" element={<Board />} />
           <Route path="/task/board" element={<Board />} />
           <Route path="/listing" element={<ListingAudit />} />
+          <Route path="/tickets" element={<TicketWorkspace />} />
           <Route path="/tickets/reports" element={<TicketReportViewer />} />
           <Route path="/listing-audit" element={<Navigate to="/listing" replace />} />
           <Route path="/task/new" element={<CreateTask />} />
