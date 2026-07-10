@@ -37,11 +37,29 @@
 - [ ] Existing tables reused
 - [ ] New tables/columns added — justify:
 
+## Governance Standards Review
+
+- [ ] Issue governance passed before work
+- [ ] Engineering principles followed
+- [ ] Frontend standards followed (or N/A)
+- [ ] Frontend stack follows React + Vite + TypeScript (or N/A)
+- [ ] If frontend stack differs, exception documented (or N/A)
+- [ ] Supabase / secrets access safe (or N/A)
+- [ ] No new Baserow dependency introduced
+- [ ] No new Cloudflare-specific coupling introduced
+- [ ] Existing canonical tables reused before creating new tables (or N/A)
+- [ ] Documentation updated where needed
+
 ## Documentation Impact
 
 - [ ] No docs changes needed
 - [ ] docs/00_CURRENT_STATE.md updated
 - [ ] docs/05_DECISION_LOG.md updated
+- [ ] docs/10_ENGINEERING_PRINCIPLES.md applicable
+- [ ] docs/11_FRONTEND_STANDARDS.md applicable
+- [ ] docs/12_DATA_ACCESS_AND_SECRETS.md applicable
+- [ ] docs/13_PLATFORM_DEPENDENCY_POLICY.md applicable
+- [ ] docs/14_ISSUE_GOVERNANCE.md applicable
 - [ ] Other docs updated:
 
 ## Verification

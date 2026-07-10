@@ -18,6 +18,11 @@ REQUIRED_SECTIONS=(
   "Runtime / Infrastructure Impact"
   "Cloudflare Dependency"
   "Baserow Dependency / Legacy Impact"
+  "Frontend Stack Impact"
+  "Engineering Standards Impact"
+  "Frontend Standards Impact"
+  "Secrets / Permissions Impact"
+  "Platform Dependency Impact"
   "Documentation Requirement"
   "Acceptance Criteria"
   "Risks / Open Questions"
@@ -209,6 +214,13 @@ main() {
   if body_mentions "$body_file" 'frontend|ui|page|route|component|screen|form'; then
     if section_exists_in_file "$body_file" "User Workflow Impact" && section_denies_impact "$body_file" "User Workflow Impact"; then
       warnings+=("Frontend/UI keywords found, but User Workflow Impact appears to say no impact.")
+    fi
+    if section_exists_in_file "$body_file" "Frontend Stack Impact"; then
+      local frontend_text
+      frontend_text=$(section_text "$body_file" "Frontend Stack Impact" | tr '[:upper:]' '[:lower:]')
+      if ! echo "$frontend_text" | grep -qE 'react.*vite.*typescript|follows.*standard|exception'; then
+        warnings+=("Frontend keywords found - Frontend Stack Impact should mention React + Vite + TypeScript compliance or document an exception.")
+      fi
     fi
   fi
 

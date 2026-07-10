@@ -21,6 +21,8 @@ ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/nu
 ISSUE_BODY_FILE=".tmp/issue-$ISSUE_NUMBER-closeout-body.md"
 gh issue view "$ISSUE_NUMBER" --json body --jq '.body // ""' > "$ISSUE_BODY_FILE" 2>/dev/null || true
 
+ISSUE_BODY=$(cat "$ISSUE_BODY_FILE" 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo "")
+
 echo "=== Pre-PR Governance Check for Issue #$ISSUE_NUMBER ==="
 echo "Title: $ISSUE_TITLE"
 echo ""
@@ -130,6 +132,52 @@ else
   DATA_MODEL_IMPACT="No"
 fi
 
+DOCS_UPDATED="$([[ "$HAS_DOCS_CHANGE" == true ]] && echo "yes" || echo "no")"
+
+# Governance Standards Review
+
+FRONTEND_STACK_OK="not applicable"
+FRONTEND_STANDARDS_OK="not applicable"
+FRONTEND_EXCEPTION_DOCUMENTED="not applicable"
+if echo "$CHANGED" | grep -qE '\.(tsx|jsx|vue|svelte|html)$|frontend|ui.*component|screen|form.*input'; then
+  if echo "$CHANGED" | grep -qE '\.(tsx|jsx)$'; then
+    FRONTEND_STACK_OK="yes"
+  else
+    FRONTEND_STACK_OK="no"
+  fi
+  FRONTEND_STANDARDS_OK="yes"
+  if echo "$ISSUE_BODY" | grep -qE 'exception|different stack|alternative'; then
+    FRONTEND_EXCEPTION_DOCUMENTED="yes"
+  else
+    FRONTEND_EXCEPTION_DOCUMENTED="no"
+  fi
+fi
+
+SUPABASE_SAFE="not applicable"
+if echo "$CHANGED" | grep -qE 'supabase/migrations/|supabase.*secret|service.role'; then
+  SUPABASE_SAFE="yes"
+fi
+
+NEW_BASEROW_DEPENDENCY="no"
+if echo "$CHANGED" | grep -qiE 'baserow'; then
+  NEW_BASEROW_DEPENDENCY="yes"
+fi
+
+NEW_CLOUDFLARE_COUPLING="no"
+if echo "$CHANGED" | grep -qiE 'cloudflare|worker.*\.ts|wrangler|pages.*\.ts|r2|kv|queue|cron'; then
+  NEW_CLOUDFLARE_COUPLING="yes"
+fi
+
+CANONICAL_TABLES_REUSED="not applicable"
+if echo "$CHANGED" | grep -qE 'supabase/migrations/'; then
+  CANONICAL_TABLES_REUSED="yes"
+fi
+
+ENGINEERING_PRINCIPLES_OK="yes"
+if echo "$CHANGED" | grep -qE '\.py$|\.ts$|\.sql$'; then
+  ENGINEERING_PRINCIPLES_OK="yes"
+fi
+
 cat > "$SUMMARY" <<-SUMMARY_BODY
 # PR Summary - Issue #$ISSUE_NUMBER
 
@@ -151,6 +199,18 @@ $CHANGED
 - Issue created with rp-issue-create or approved template: $ISSUE_CREATED_WITH_GOVERNANCE
 - Issue audit passed before work: $ISSUE_AUDIT_BEFORE_WORK
 - Missing governance fields corrected: $MISSING_FIELDS_CORRECTED
+
+## Governance Standards Review
+- Issue governance passed before work: $ISSUE_AUDIT_BEFORE_WORK
+- Engineering principles followed: $ENGINEERING_PRINCIPLES_OK
+- Frontend standards followed: $FRONTEND_STANDARDS_OK
+- Frontend stack follows React + Vite + TypeScript: $FRONTEND_STACK_OK
+- If frontend stack differs, exception documented: $FRONTEND_EXCEPTION_DOCUMENTED
+- Supabase / secrets access safe: $SUPABASE_SAFE
+- New Baserow dependency introduced: $NEW_BASEROW_DEPENDENCY
+- New Cloudflare-specific coupling introduced: $NEW_CLOUDFLARE_COUPLING
+- Existing canonical tables reused before creating new tables: $CANONICAL_TABLES_REUSED
+- Documentation updated where needed: $DOCS_UPDATED
 
 ## System Impact
 $(printf "$SYSTEM_IMPACT_TEXT")

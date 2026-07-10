@@ -79,6 +79,54 @@ if ! bin/rp-issue-audit "$ISSUE_NUMBER" --fix-draft; then
   echo "WARN: continuing with non-compliant Issue because --allow-noncompliant-issue was provided."
 fi
 
+echo "=== Checking for missing relevant governance impact fields ==="
+ISSUE_BODY_FILE=".tmp/issue-$ISSUE_NUMBER-body.md"
+if [[ -f "$ISSUE_BODY_FILE" ]]; then
+  MISSING_RELEVANT=()
+  body_content=$(cat "$ISSUE_BODY_FILE" | tr '[:upper:]' '[:lower:]')
+
+  if echo "$body_content" | grep -qE 'frontend|ui|page|route|component|screen|form|react|vite'; then
+    if ! grep -q "Frontend Stack Impact" "$ISSUE_BODY_FILE" 2>/dev/null; then
+      MISSING_RELEVANT+=("Frontend Stack Impact")
+    fi
+  fi
+  if echo "$body_content" | grep -qE 'supabase|migration|rls|postgres|schema|secret|env|\.env|service.role'; then
+    if ! grep -q "Supabase Impact" "$ISSUE_BODY_FILE" 2>/dev/null; then
+      MISSING_RELEVANT+=("Supabase Impact")
+    fi
+    if ! grep -q "Secrets / Permissions Impact" "$ISSUE_BODY_FILE" 2>/dev/null; then
+      MISSING_RELEVANT+=("Secrets / Permissions Impact")
+    fi
+  fi
+  if echo "$body_content" | grep -qE 'cloudflare|worker|wrangler|pages|r2|kv|queue|cron|d1'; then
+    if ! grep -q "Cloudflare Dependency" "$ISSUE_BODY_FILE" 2>/dev/null; then
+      MISSING_RELEVANT+=("Cloudflare Dependency")
+    fi
+  fi
+  if echo "$body_content" | grep -qE 'baserow'; then
+    if ! grep -q "Baserow Dependency" "$ISSUE_BODY_FILE" 2>/dev/null; then
+      MISSING_RELEVANT+=("Baserow Dependency / Legacy Impact")
+    fi
+  fi
+
+  if [[ ${#MISSING_RELEVANT[@]} -gt 0 ]]; then
+    echo "FAIL: Issue #$ISSUE_NUMBER is missing relevant governance impact fields:"
+    printf '  - %s\n' "${MISSING_RELEVANT[@]}"
+    echo ""
+    if [[ "$ALLOW_NONCOMPLIANT" != true ]]; then
+      echo "Correct the Issue first, then rerun:"
+      echo "  bin/rp-issue-work $ISSUE_NUMBER"
+      echo ""
+      echo "Explicit exception only:"
+      echo "  bin/rp-issue-work $ISSUE_NUMBER --allow-noncompliant-issue"
+      exit 1
+    fi
+    echo "WARN: continuing with missing relevant fields because --allow-noncompliant-issue was provided."
+  else
+    echo "All relevant governance impact fields present."
+  fi
+fi
+
 if ! git diff --quiet || ! git diff --cached --quiet; then
   die "Working tree is not clean. Commit or stash changes first."
 fi
@@ -109,9 +157,11 @@ $TITLE
 ## Required documents
 
 - [ ] docs/00_CURRENT_STATE.md
+- [ ] docs/10_ENGINEERING_PRINCIPLES.md
+- [ ] docs/14_ISSUE_GOVERNANCE.md
 BRIEF_HEADER
 
-for doc in docs/01_SYSTEM_OVERVIEW.md docs/04_DATA_MODEL.md docs/05_DECISION_LOG.md docs/07_AGENT_CONTEXT.md AGENTS.md CLAUDE.md; do
+for doc in docs/01_SYSTEM_OVERVIEW.md docs/04_DATA_MODEL.md docs/05_DECISION_LOG.md docs/07_AGENT_CONTEXT.md docs/11_FRONTEND_STANDARDS.md docs/12_DATA_ACCESS_AND_SECRETS.md docs/13_PLATFORM_DEPENDENCY_POLICY.md AGENTS.md CLAUDE.md; do
   if [[ -f "$doc" ]]; then
     echo "- [ ] $doc" >> "$BRIEF"
   fi
@@ -138,6 +188,27 @@ cat >> "$BRIEF" <<-BRIEF_BODY
 \`bin/rp-issue-closeout $ISSUE_NUMBER\`
 BRIEF_BODY
 
+ISSUE_BODY_FILE=".tmp/issue-$ISSUE_NUMBER-body.md"
+if [[ -f "$ISSUE_BODY_FILE" ]]; then
+  echo ""
+  echo "=== Standards relevance check ==="
+  ISSUE_BODY=$(cat "$ISSUE_BODY_FILE" | tr '[:upper:]' '[:lower:]')
+
+  if echo "$ISSUE_BODY" | grep -qE 'frontend|ui|page|route|component|screen|form|react|vite'; then
+    echo "- Frontend standards (docs/11_FRONTEND_STANDARDS.md) are relevant."
+  fi
+  if echo "$ISSUE_BODY" | grep -qE 'supabase|migration|rls|postgres|schema|secret|env|\.env|service.role|anon'; then
+    echo "- Data access standards (docs/12_DATA_ACCESS_AND_SECRETS.md) are relevant."
+  fi
+  if echo "$ISSUE_BODY" | grep -qE 'cloudflare|worker|wrangler|pages|r2|kv|queue|cron|d1'; then
+    echo "- Platform dependency policy (docs/13_PLATFORM_DEPENDENCY_POLICY.md) is relevant."
+  fi
+  if echo "$ISSUE_BODY" | grep -qE 'baserow'; then
+    echo "- WARNING: Baserow referenced in Issue. Check platform dependency policy."
+  fi
+fi
+
+echo ""
 echo "Generated work brief: $BRIEF"
 echo ""
 echo "Start branch when ready:"
