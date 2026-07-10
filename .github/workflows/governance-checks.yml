@@ -1,0 +1,12 @@
+# Governance Checks — calls the central reusable workflow from rp-governance-kit
+# See: https://github.com/retailpulses/rp-governance-kit
+name: Governance Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  governance:
+    uses: retailpulses/rp-governance-kit/.github/workflows/governance-checks.yml@main

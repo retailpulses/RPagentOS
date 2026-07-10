@@ -11,3 +11,6 @@ coverage
 supabase/.branches
 supabase/.temp
 data/
+
+# Temp files
+.tmp/

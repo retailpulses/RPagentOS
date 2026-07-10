@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# rp-issue-create — generate a standardized GitHub Issue template
+set -euo pipefail
+
+ISSUE_KIND="${1:-}"
+if [[ -z "$ISSUE_KIND" ]]; then
+  echo "Usage: bin/rp-issue-create <type>"
+  echo "Types: feature, bug, architecture, data-model, docs"
+  exit 1
+fi
+
+if ! command -v gh &>/dev/null; then
+  echo "Error: gh CLI is not installed or not in PATH"
+  exit 1
+fi
+
+mkdir -p .tmp
+DRAFT=".tmp/issue-draft.md"
+
+case "$ISSUE_KIND" in
+  feature)     TITLE="[Feature] " ;;
+  bug)         TITLE="[Bug] " ;;
+  architecture) TITLE="[Architecture] " ;;
+  data-model)  TITLE="[Data Model] " ;;
+  docs)        TITLE="[Docs] " ;;
+  *)
+    echo "Unknown type: $ISSUE_KIND"
+    echo "Valid types: feature, bug, architecture, data-model, docs"
+    exit 1
+    ;;
+esac
+
+cat > "$DRAFT" <<- ISSUE_BODY
+## Background
+
+<!-- Why is this needed? What problem does it solve? -->
+
+## Current Behavior / Current State
+
+<!-- What happens now? What is the baseline? -->
+
+## Desired Outcome
+
+<!-- What should happen after this is done? -->
+
+## Scope
+
+<!-- What is included in this change? Be specific. -->
+
+- [ ]
+
+## Out of Scope
+
+<!-- What is explicitly not included? -->
+
+- [ ]
+
+## User Story Impact
+
+- [ ] Does NOT affect user workflow
+- [ ] Affects user workflow — describe:
+
+## Data Model Impact
+
+- [ ] No data model changes needed
+- [ ] Existing tables reused — list:
+- [ ] New tables required — justify:
+- [ ] New columns required — justify:
+
+> **REMINDER**: Do not create duplicate Supabase tables. Check existing migrations before adding new ones.
+
+## Architecture Impact
+
+- [ ] No architecture impact
+- [ ] Affects architecture — describe:
+
+## Documentation Requirement
+
+- [ ] No docs changes needed
+- [ ] docs/00_CURRENT_STATE.md must be updated
+- [ ] docs/05_DECISION_LOG.md entry required
+- [ ] Other docs impacted:
+
+> **REMINDER**: Identify whether this affects user workflow, data model, architecture, or agent workflow. Docs updates are required when any of these change.
+
+## Acceptance Criteria
+
+- [ ] Criterion 1:
+- [ ] Criterion 2:
+- [ ] Criterion 3:
+
+## Risks / Open Questions
+
+-
+ISSUE_BODY
+
+echo "=== Issue draft created at $DRAFT ==="
+echo ""
+echo "Review the draft, then submit with:"
+echo ""
+echo "  gh issue create --title \"$TITLE<your title>\" --body-file \"$DRAFT\" --label \"$ISSUE_KIND\""
+echo ""
+echo "Or to auto-submit (once draft is ready):"
+echo ""
+echo "  bin/rp-issue-create $ISSUE_KIND --submit"
+echo ""
+
+if [[ "${2:-}" == "--submit" ]]; then
+  echo "=== Submitting issue... ==="
+  gh issue create --title "$TITLE" --body-file "$DRAFT" --label "$ISSUE_KIND"
+fi
