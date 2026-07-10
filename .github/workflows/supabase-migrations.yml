@@ -11,6 +11,18 @@ on:
         options:
           - "true"
           - "false"
+      repair_versions:
+        description: "Optional space-separated migration versions to repair before push"
+        required: false
+        default: ""
+      repair_status:
+        description: "Status to set for repaired versions"
+        required: true
+        default: "reverted"
+        type: choice
+        options:
+          - "reverted"
+          - "applied"
 
 permissions:
   contents: read
@@ -46,6 +58,27 @@ jobs:
             --yes
 
       - name: Show migration history
+        run: supabase migration list --linked --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Repair migration history
+        if: ${{ inputs.repair_versions != '' }}
+        env:
+          REPAIR_VERSIONS: ${{ inputs.repair_versions }}
+          REPAIR_STATUS: ${{ inputs.repair_status }}
+        run: |
+          if ! [[ "$REPAIR_VERSIONS" =~ ^[0-9[:space:]]+$ ]]; then
+            echo "repair_versions must be a space-separated list of numeric migration versions"
+            exit 1
+          fi
+          read -r -a versions <<< "$REPAIR_VERSIONS"
+          supabase migration repair \
+            --linked \
+            --password "$SUPABASE_DB_PASSWORD" \
+            --status "$REPAIR_STATUS" \
+            "${versions[@]}"
+
+      - name: Show migration history after repair
+        if: ${{ inputs.repair_versions != '' }}
         run: supabase migration list --linked --password "$SUPABASE_DB_PASSWORD"
 
       - name: Dry-run migration push
