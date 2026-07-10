@@ -1,0 +1,29 @@
+# Post-Deploy Governance — calls the central reusable workflow from rp-governance-kit
+# See: https://github.com/retailpulses/rp-governance-kit
+name: Post-Deploy Governance
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      deployed_target:
+        required: false
+        type: string
+        default: ""
+      smoke_test_result:
+        required: false
+        type: string
+        default: "unknown"
+
+jobs:
+  post-deploy-governance:
+    uses: retailpulses/rp-governance-kit/.github/workflows/post-deploy-governance.yml@main
+    with:
+      environment: ${{ inputs.environment }}
+      deployed_target: ${{ inputs.deployed_target }}
+      smoke_test_result: ${{ inputs.smoke_test_result }}
+      comment_pr: true
+      comment_issue: true
+      artifact: true
