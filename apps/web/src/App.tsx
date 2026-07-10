@@ -7,6 +7,9 @@ const Today = lazy(() => import('./pages/Today'))
 const Board = lazy(() => import('./pages/Board'))
 const CreateTask = lazy(() => import('./pages/CreateTask'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
+const ProjectList = lazy(() => import('./pages/ProjectList'))
+const CreateProject = lazy(() => import('./pages/CreateProject'))
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
 
 export default function App() {
   return (
@@ -24,6 +27,9 @@ export default function App() {
           <Route path="/tasks/new" element={<CreateTask />} />
           <Route path="/task/:id" element={<TaskDetail />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
+          <Route path="/projects" element={<ProjectList />} />
+          <Route path="/projects/new" element={<CreateProject />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
         </Routes>
       </Suspense>
     </Layout>
