@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAddTaskAttachment, useRemoveTaskAttachment, useTaskDetail, useTaskSelectOptions, useUpdateTask, useUpdateTaskStatus } from '../hooks/useTasks'
+import { useProjectOptions } from '../hooks/useProjects'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
 import TaskTargets from '../components/TaskTargets'
@@ -34,6 +35,7 @@ export default function TaskDetail() {
   const sourceOptions = useTaskSelectOptions('source')
   const platformOptions = useTaskSelectOptions('platform')
   const shopCodeOptions = useTaskSelectOptions('shop_code')
+  const projectOptions = useProjectOptions()
   const [attachmentDescription, setAttachmentDescription] = useState('')
   const [localUploadError, setLocalUploadError] = useState<string | null>(null)
   const [removingAttachmentId, setRemovingAttachmentId] = useState<string | null>(null)
@@ -52,6 +54,7 @@ export default function TaskDetail() {
     source: 'manual' as TaskSource,
     approval_required: false,
     execution_brief: '',
+    project_id: '',
   })
 
   const startEditing = () => {
@@ -71,6 +74,7 @@ export default function TaskDetail() {
       source: task.source,
       approval_required: task.approval_required,
       execution_brief: task.execution_brief ?? '',
+      project_id: task.project_id ?? '',
     })
     setEditing(true)
   }
@@ -137,6 +141,7 @@ export default function TaskDetail() {
       source: editForm.source,
       approval_required: editForm.approval_required,
       execution_brief: editForm.execution_brief.trim() || null,
+      project_id: editForm.project_id || null,
     })
 
     if (result) {
@@ -293,6 +298,19 @@ export default function TaskDetail() {
             />
           </div>
 
+          <div className="form-group">
+            <label>Project</label>
+            <select
+              value={editForm.project_id}
+              onChange={e => setEditForm({ ...editForm, project_id: e.target.value })}
+            >
+              <option value="">No project</option>
+              {projectOptions.data.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
           {saveError && <p className="text-sm" style={{ color: 'var(--color-urgent)' }}>{saveError}</p>}
 
           <div className="flex gap-2">
@@ -334,6 +352,16 @@ export default function TaskDetail() {
             <div className="text-sm"><span className="text-muted">Source:</span> {task.source}</div>
             <div className="text-sm"><span className="text-muted">Created by:</span> {task.created_by}</div>
             <div className="text-sm"><span className="text-muted">Owner:</span> {task.owner_key || '-'}</div>
+            <div className="text-sm">
+              <span className="text-muted">Project:</span>{' '}
+              {task.project_id ? (
+                <Link to={`/projects/${task.project_id}`}>
+                  {projectOptions.data.find(p => p.id === task.project_id)?.name ?? task.project_id.slice(0, 8) + '...'}
+                </Link>
+              ) : (
+                '-'
+              )}
+            </div>
             {task.due_date && (
               <div className="text-sm">
                 <span className="text-muted">Due:</span> {task.due_date}

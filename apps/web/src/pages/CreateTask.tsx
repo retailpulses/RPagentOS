@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCreateTask, useLinkTarget, useTaskSelectOptions } from '../hooks/useTasks'
+import { useProjectOptions } from '../hooks/useProjects'
 import type { TaskType, TaskPriority, OwnerType, OwnerKey, TaskSource } from '@lib/task-types'
 
 export default function CreateTask() {
@@ -15,6 +16,8 @@ export default function CreateTask() {
   const platformOptions = useTaskSelectOptions('platform')
   const shopCodeOptions = useTaskSelectOptions('shop_code')
   const targetTypeOptions = useTaskSelectOptions('target_type')
+  const projectOptions = useProjectOptions()
+  const [searchParams] = useSearchParams()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -32,6 +35,7 @@ export default function CreateTask() {
   const [targetType, setTargetType] = useState('')
   const [targetId, setTargetId] = useState('')
   const [targetLabel, setTargetLabel] = useState('')
+  const [projectId, setProjectId] = useState(searchParams.get('project_id') ?? '')
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -53,6 +57,7 @@ export default function CreateTask() {
       source,
       approval_required: approvalRequired,
       execution_brief: executionBrief.trim() || undefined,
+      project_id: projectId || null,
     })
     setSubmitting(false)
 
@@ -203,6 +208,16 @@ export default function CreateTask() {
             placeholder="Guidance for agent execution (display-only, no external actions)"
             rows={3}
           />
+        </div>
+
+        <div className="form-group">
+          <label>Project</label>
+          <select value={projectId} onChange={e => setProjectId(e.target.value)}>
+            <option value="">No project</option>
+            {projectOptions.data.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
         <fieldset className="card flex flex-col gap-3" style={{ border: 0 }}>
