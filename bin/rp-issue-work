@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# rp-issue-work — prepare the agent to work on an existing GitHub Issue
+set -euo pipefail
+
+ISSUE_NUMBER="${1:-}"
+if [[ -z "$ISSUE_NUMBER" ]]; then
+  echo "Usage: bin/rp-issue-work <issue-number>"
+  exit 1
+fi
+
+if ! command -v gh &>/dev/null; then
+  echo "Error: gh CLI is not installed or not in PATH"
+  exit 1
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Error: Working tree is not clean. Commit or stash your changes first."
+  exit 1
+fi
+
+echo "=== Fetching issue #$ISSUE_NUMBER ==="
+gh issue view "$ISSUE_NUMBER" --json title,body,labels,state > ".tmp/issue-$ISSUE_NUMBER.json"
+gh issue view "$ISSUE_NUMBER" --json title,body,labels,state --jq '.title' > ".tmp/issue-$ISSUE_NUMBER-title.txt"
+
+TITLE=$(cat ".tmp/issue-$ISSUE_NUMBER-title.txt")
+echo "Issue: #$ISSUE_NUMBER — $TITLE"
+echo ""
+
+BRIEF=".tmp/agent-work-brief-$ISSUE_NUMBER.md"
+
+cat > "$BRIEF" <<- BRIEF_HEADER
+# Agent Work Brief — Issue #$ISSUE_NUMBER
+
+## Issue
+$TITLE
+
+## Required documents to read
+
+- [ ] docs/00_CURRENT_STATE.md
+BRIEF_HEADER
+
+for doc in docs/01_SYSTEM_OVERVIEW.md docs/04_DATA_MODEL.md docs/05_DECISION_LOG.md docs/07_AGENT_CONTEXT.md AGENTS.md CLAUDE.md; do
+  if [[ -f "$doc" ]]; then
+    echo "- [ ] $doc" >> "$BRIEF"
+  fi
+done
+
+echo "" >> "$BRIEF"
+
+SAFE_TITLE=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//' | head -c 60)
+BRANCH="issue-$ISSUE_NUMBER-$SAFE_TITLE"
+echo "Suggested branch: $BRANCH"
+echo "" >> "$BRIEF"
+echo "## Suggested branch" >> "$BRIEF"
+echo "\`$BRANCH\`" >> "$BRIEF"
+echo "" >> "$BRIEF"
+
+cat >> "$BRIEF" <<- BRIEF_REMINDERS
+## Reminders
+
+1. **Scope**: Keep the change scoped to this Issue. Do not add unrelated refactoring or features.
+2. **Supabase tables**: Do not create duplicate tables. Check existing migrations before adding new tables or columns.
+3. **Docs updates required if this change affects**:
+   - System scope
+   - User stories
+   - Data model
+   - Architecture
+   - Operating workflow
+   - Agent workflow
+4. **Pre-PR**: Run \`bin/rp-issue-closeout $ISSUE_NUMBER\` before opening a PR.
+
+BRIEF_REMINDERS
+
+echo "=== Agent work brief created at $BRIEF ==="
+echo ""
+echo "Create branch and start working:"
+echo ""
+echo "  git checkout -b $BRANCH"
+echo ""

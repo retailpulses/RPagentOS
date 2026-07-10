@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# rp-issue-closeout — pre-PR governance checks and PR summary generation
+set -euo pipefail
+
+ISSUE_NUMBER="${1:-}"
+if [[ -z "$ISSUE_NUMBER" ]]; then
+  echo "Usage: bin/rp-issue-closeout <issue-number>"
+  exit 1
+fi
+
+ISSUE_JSON=".tmp/issue-$ISSUE_NUMBER.json"
+if [[ ! -f "$ISSUE_JSON" ]]; then
+  echo "Warning: No cached issue data found at $ISSUE_JSON"
+  echo "Run bin/rp-issue-work $ISSUE_NUMBER first, or ensure the file exists."
+  echo "Continuing with limited issue info..."
+fi
+
+ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/null || echo "Issue #$ISSUE_NUMBER")
+
+echo "=== Pre-PR Governance Check for Issue #$ISSUE_NUMBER ==="
+echo "Title: $ISSUE_TITLE"
+echo ""
+
+echo "--- Changed files ---"
+CHANGED=$(git diff --name-only --relative HEAD 2>/dev/null || git diff --name-only --relative)
+if [[ -z "$CHANGED" ]]; then
+  echo "(no changes detected — check your branch: git diff main...HEAD)"
+  CHANGED=$(git diff main...HEAD --name-only 2>/dev/null || true)
+fi
+echo "$CHANGED"
+echo ""
+
+SYSTEM_PATTERNS="supabase/migrations/|schema|types|routes|apps/.*/pages/|apps/.*/routes/|AGENTS\.md|CLAUDE\.md"
+DOCS_PATTERNS="^docs/|^README\.md"
+
+SYSTEM_FILES=$(echo "$CHANGED" | grep -E "$SYSTEM_PATTERNS" || true)
+DOCS_FILES=$(echo "$CHANGED" | grep -E "$DOCS_PATTERNS" || true)
+
+HAS_SYSTEM_IMPACT=false
+HAS_DOCS_CHANGE=false
+
+if [[ -n "$SYSTEM_FILES" ]]; then
+  HAS_SYSTEM_IMPACT=true
+  echo "=== System-impacting files changed ==="
+  echo "$SYSTEM_FILES"
+fi
+
+if [[ -n "$DOCS_FILES" ]]; then
+  HAS_DOCS_CHANGE=true
+  echo "=== Documentation files changed ==="
+  echo "$DOCS_FILES"
+fi
+
+if [[ "$HAS_SYSTEM_IMPACT" == true && "$HAS_DOCS_CHANGE" == false ]]; then
+  echo ""
+  echo "!!! WARNING: System-impacting files changed but NO documentation was updated !!!"
+  echo "    Consider updating docs/00_CURRENT_STATE.md or docs/05_DECISION_LOG.md"
+fi
+
+echo ""
+
+SUMMARY=".tmp/pr-summary-$ISSUE_NUMBER.md"
+
+SYSTEM_IMPACT_TEXT=""
+if echo "$SYSTEM_FILES" | grep -q "supabase/migrations/"; then
+  SYSTEM_IMPACT_TEXT="${SYSTEM_IMPACT_TEXT}- Database migration changed\n"
+fi
+if echo "$SYSTEM_FILES" | grep -qE "schema|types"; then
+  SYSTEM_IMPACT_TEXT="${SYSTEM_IMPACT_TEXT}- Schema/types changed\n"
+fi
+if echo "$SYSTEM_FILES" | grep -qE "routes|pages"; then
+  SYSTEM_IMPACT_TEXT="${SYSTEM_IMPACT_TEXT}- Routes/pages changed\n"
+fi
+if echo "$SYSTEM_FILES" | grep -qE "AGENTS\.md|CLAUDE\.md"; then
+  SYSTEM_IMPACT_TEXT="${SYSTEM_IMPACT_TEXT}- Agent configuration changed\n"
+fi
+if [[ -z "$SYSTEM_IMPACT_TEXT" ]]; then
+  SYSTEM_IMPACT_TEXT="None\n"
+fi
+
+DATA_MODEL_IMPACT=""
+if echo "$SYSTEM_FILES" | grep -q "supabase/migrations/"; then
+  DATA_MODEL_IMPACT="Yes — migration files changed"
+else
+  DATA_MODEL_IMPACT="No"
+fi
+
+cat > "$SUMMARY" <<- SUMMARY_BODY
+# PR Summary — Issue #$ISSUE_NUMBER
+
+## Linked Issue
+Closes #$ISSUE_NUMBER — $ISSUE_TITLE
+
+## What Changed
+<!-- Brief description of the changes -->
+
+## Why
+<!-- Motivation for the change -->
+
+## Files Changed
+\`\`\`
+$CHANGED
+\`\`\`
+
+## System Impact
+$(printf "$SYSTEM_IMPACT_TEXT")
+
+## Data Model Impact
+$DATA_MODEL_IMPACT
+
+## Documentation Updated
+- $([[ "$HAS_DOCS_CHANGE" == true ]] && echo "Yes" || echo "No")
+$([[ -n "$DOCS_FILES" ]] && echo "- Files: $DOCS_FILES" || "")
+
+## Verification
+- [ ] Typecheck passes
+- [ ] Build passes
+- [ ] Tests pass
+- [ ] Manually verified
+
+## Risks for Jim to Review
+
+## Suggested Review Focus
+SUMMARY_BODY
+
+echo "=== PR summary generated at $SUMMARY ==="
+echo ""
+
+if [[ -f "web/worker/package.json" ]]; then
+  echo "=== Running typecheck (web/worker) ==="
+  (cd web/worker && npm run typecheck 2>/dev/null) && echo "Typecheck: PASSED" || echo "Typecheck: FAILED (see above)"
+  echo ""
+  echo "=== Running build check (web/worker) ==="
+  (cd web/worker && npm run build 2>/dev/null) && echo "Build: PASSED" || echo "Build: SKIPPED or FAILED (non-blocking for closeout)"
+fi
+
+for pkg in package.json web/package.json; do
+  if [[ -f "$pkg" ]]; then
+    pkg_dir=$(dirname "$pkg")
+    echo "=== Running typecheck ($pkg_dir) ==="
+    (cd "$pkg_dir" && npm run typecheck 2>/dev/null) && echo "Typecheck: PASSED" || echo "Typecheck: SKIPPED or FAILED (non-blocking)"
+    echo "=== Running build ($pkg_dir) ==="
+    (cd "$pkg_dir" && npm run build 2>/dev/null) && echo "Build: PASSED" || echo "Build: SKIPPED or FAILED (non-blocking)"
+  fi
+done
+
+echo ""
+echo "Done. Open a PR with:"
+echo ""
+echo "  gh pr create --fill --body-file $SUMMARY"
+echo ""
