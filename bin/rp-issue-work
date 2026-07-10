@@ -1,40 +1,112 @@
 #!/usr/bin/env bash
-# rp-issue-work — prepare the agent to work on an existing GitHub Issue
+# rp-issue-work - prepare agent work on an existing governed GitHub Issue
 set -euo pipefail
 
-ISSUE_NUMBER="${1:-}"
-if [[ -z "$ISSUE_NUMBER" ]]; then
-  echo "Usage: bin/rp-issue-work <issue-number>"
+ISSUE_NUMBER=""
+ALLOW_NONCOMPLIANT=false
+
+usage() {
+  cat <<-USAGE
+Usage: bin/rp-issue-work <issue-number> [options]
+
+Options:
+  --allow-noncompliant-issue  Continue even when the Issue fails governance audit.
+  --help                      Show help.
+USAGE
+}
+
+die() {
+  echo "Error: $*" >&2
   exit 1
-fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --allow-noncompliant-issue)
+      ALLOW_NONCOMPLIANT=true
+      shift
+      ;;
+    -*)
+      die "Unknown option: $1"
+      ;;
+    *)
+      if [[ -n "$ISSUE_NUMBER" ]]; then
+        die "Only one issue number allowed"
+      fi
+      ISSUE_NUMBER="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$ISSUE_NUMBER" ]] || {
+  usage
+  exit 1
+}
+[[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]] || die "Issue number must be numeric"
 
 if ! command -v gh &>/dev/null; then
-  echo "Error: gh CLI is not installed or not in PATH"
-  exit 1
+  die "gh CLI is not installed or not in PATH"
+fi
+if ! gh auth status &>/dev/null; then
+  die "gh CLI is not authenticated. Run 'gh auth login' first."
+fi
+if [[ ! -x "bin/rp-issue-audit" ]]; then
+  die "bin/rp-issue-audit is missing or not executable. Install the current governance kit before starting work."
+fi
+
+mkdir -p .tmp
+
+echo "=== Auditing issue #$ISSUE_NUMBER ==="
+if ! bin/rp-issue-audit "$ISSUE_NUMBER" --fix-draft; then
+  if [[ "$ALLOW_NONCOMPLIANT" != true ]]; then
+    echo ""
+    echo "Issue #$ISSUE_NUMBER failed governance audit."
+    echo "Coding must not start from a non-compliant Issue."
+    echo "Correction draft: .tmp/issue-correction-$ISSUE_NUMBER.md"
+    echo ""
+    echo "Correct the Issue first, then rerun:"
+    echo "  bin/rp-issue-work $ISSUE_NUMBER"
+    echo ""
+    echo "Explicit exception only:"
+    echo "  bin/rp-issue-work $ISSUE_NUMBER --allow-noncompliant-issue"
+    exit 1
+  fi
+  echo "WARN: continuing with non-compliant Issue because --allow-noncompliant-issue was provided."
 fi
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "Error: Working tree is not clean. Commit or stash your changes first."
-  exit 1
+  die "Working tree is not clean. Commit or stash changes first."
 fi
 
 echo "=== Fetching issue #$ISSUE_NUMBER ==="
 gh issue view "$ISSUE_NUMBER" --json title,body,labels,state > ".tmp/issue-$ISSUE_NUMBER.json"
-gh issue view "$ISSUE_NUMBER" --json title,body,labels,state --jq '.title' > ".tmp/issue-$ISSUE_NUMBER-title.txt"
+gh issue view "$ISSUE_NUMBER" --json title --jq '.title' > ".tmp/issue-$ISSUE_NUMBER-title.txt"
 
 TITLE=$(cat ".tmp/issue-$ISSUE_NUMBER-title.txt")
-echo "Issue: #$ISSUE_NUMBER — $TITLE"
+echo "Issue: #$ISSUE_NUMBER - $TITLE"
 echo ""
 
 BRIEF=".tmp/agent-work-brief-$ISSUE_NUMBER.md"
+AUDIT_STATUS=$(cat ".tmp/issue-audit-$ISSUE_NUMBER.status" 2>/dev/null || echo "unknown")
 
-cat > "$BRIEF" <<- BRIEF_HEADER
-# Agent Work Brief — Issue #$ISSUE_NUMBER
+cat > "$BRIEF" <<-BRIEF_HEADER
+# Agent Work Brief - Issue #$ISSUE_NUMBER
 
 ## Issue
 $TITLE
 
-## Required documents to read
+## Issue governance
+
+- Coding must not start from a non-compliant Issue.
+- If the Issue does not follow governance structure, correct the Issue before implementation.
+- Issue audit status before work: $AUDIT_STATUS
+
+## Required documents
 
 - [ ] docs/00_CURRENT_STATE.md
 BRIEF_HEADER
@@ -45,35 +117,29 @@ for doc in docs/01_SYSTEM_OVERVIEW.md docs/04_DATA_MODEL.md docs/05_DECISION_LOG
   fi
 done
 
-echo "" >> "$BRIEF"
-
 SAFE_TITLE=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//' | head -c 60)
 BRANCH="issue-$ISSUE_NUMBER-$SAFE_TITLE"
-echo "Suggested branch: $BRANCH"
-echo "" >> "$BRIEF"
-echo "## Suggested branch" >> "$BRIEF"
-echo "\`$BRANCH\`" >> "$BRIEF"
-echo "" >> "$BRIEF"
 
-cat >> "$BRIEF" <<- BRIEF_REMINDERS
-## Reminders
+cat >> "$BRIEF" <<-BRIEF_BODY
 
-1. **Scope**: Keep the change scoped to this Issue. Do not add unrelated refactoring or features.
-2. **Supabase tables**: Do not create duplicate tables. Check existing migrations before adding new tables or columns.
-3. **Docs updates required if this change affects**:
-   - System scope
-   - User stories
-   - Data model
-   - Architecture
-   - Operating workflow
-   - Agent workflow
-4. **Pre-PR**: Run \`bin/rp-issue-closeout $ISSUE_NUMBER\` before opening a PR.
+## Suggested branch
 
-BRIEF_REMINDERS
+\`$BRANCH\`
 
-echo "=== Agent work brief created at $BRIEF ==="
+## Implementation rules
+
+- Keep the Issue scope authoritative.
+- Do not broaden scope without updating the Issue.
+- Update docs when current state, data model, runtime, or user workflow changes.
+- Run \`bin/rp-issue-closeout $ISSUE_NUMBER\` before opening a PR.
+
+## Pre-PR
+
+\`bin/rp-issue-closeout $ISSUE_NUMBER\`
+BRIEF_BODY
+
+echo "Generated work brief: $BRIEF"
 echo ""
-echo "Create branch and start working:"
-echo ""
+echo "Start branch when ready:"
 echo "  git checkout -b $BRANCH"
 echo ""

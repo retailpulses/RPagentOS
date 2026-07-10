@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rp-issue-closeout — pre-PR governance checks and PR summary generation
+# rp-issue-closeout - pre-PR governance checks and PR summary generation
 set -euo pipefail
 
 ISSUE_NUMBER="${1:-}"
@@ -7,6 +7,8 @@ if [[ -z "$ISSUE_NUMBER" ]]; then
   echo "Usage: bin/rp-issue-closeout <issue-number>"
   exit 1
 fi
+
+mkdir -p .tmp
 
 ISSUE_JSON=".tmp/issue-$ISSUE_NUMBER.json"
 if [[ ! -f "$ISSUE_JSON" ]]; then
@@ -16,15 +18,58 @@ if [[ ! -f "$ISSUE_JSON" ]]; then
 fi
 
 ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/null || echo "Issue #$ISSUE_NUMBER")
+ISSUE_BODY_FILE=".tmp/issue-$ISSUE_NUMBER-closeout-body.md"
+gh issue view "$ISSUE_NUMBER" --json body --jq '.body // ""' > "$ISSUE_BODY_FILE" 2>/dev/null || true
 
 echo "=== Pre-PR Governance Check for Issue #$ISSUE_NUMBER ==="
 echo "Title: $ISSUE_TITLE"
 echo ""
 
+ISSUE_AUDIT_CURRENT="unknown"
+if [[ -x "bin/rp-issue-audit" ]]; then
+  if bin/rp-issue-audit "$ISSUE_NUMBER"; then
+    ISSUE_AUDIT_CURRENT=$(cat ".tmp/issue-audit-$ISSUE_NUMBER.status" 2>/dev/null || echo "PASS")
+  else
+    ISSUE_AUDIT_CURRENT="FAIL"
+  fi
+else
+  echo "Warning: bin/rp-issue-audit is missing; Issue governance status is unknown."
+fi
+echo ""
+
+ISSUE_AUDIT_BEFORE_WORK="unknown - Jim review needed"
+if [[ -f ".tmp/agent-work-brief-$ISSUE_NUMBER.md" ]]; then
+  if grep -q "Issue audit status before work: PASS" ".tmp/agent-work-brief-$ISSUE_NUMBER.md"; then
+    ISSUE_AUDIT_BEFORE_WORK="yes"
+  elif grep -q "Issue audit status before work: WARN" ".tmp/agent-work-brief-$ISSUE_NUMBER.md"; then
+    ISSUE_AUDIT_BEFORE_WORK="yes (warnings)"
+  elif grep -q "Issue audit status before work: FAIL" ".tmp/agent-work-brief-$ISSUE_NUMBER.md"; then
+    ISSUE_AUDIT_BEFORE_WORK="no"
+  fi
+fi
+
+ISSUE_CREATED_WITH_GOVERNANCE="unknown - Jim review needed"
+if grep -q "rp-governance-format: v1" "$ISSUE_BODY_FILE" 2>/dev/null; then
+  ISSUE_CREATED_WITH_GOVERNANCE="yes"
+elif [[ "$ISSUE_AUDIT_CURRENT" == "PASS" || "$ISSUE_AUDIT_CURRENT" == "WARN" ]]; then
+  ISSUE_CREATED_WITH_GOVERNANCE="yes"
+elif [[ "$ISSUE_AUDIT_CURRENT" == "FAIL" ]]; then
+  ISSUE_CREATED_WITH_GOVERNANCE="no"
+fi
+
+MISSING_FIELDS_CORRECTED="unknown - Jim review needed"
+if [[ "$ISSUE_AUDIT_CURRENT" == "FAIL" ]]; then
+  MISSING_FIELDS_CORRECTED="no"
+elif [[ -f ".tmp/issue-correction-$ISSUE_NUMBER.md" ]]; then
+  MISSING_FIELDS_CORRECTED="yes"
+elif [[ "$ISSUE_AUDIT_CURRENT" == "PASS" || "$ISSUE_AUDIT_CURRENT" == "WARN" ]]; then
+  MISSING_FIELDS_CORRECTED="not needed"
+fi
+
 echo "--- Changed files ---"
 CHANGED=$(git diff --name-only --relative HEAD 2>/dev/null || git diff --name-only --relative)
 if [[ -z "$CHANGED" ]]; then
-  echo "(no changes detected — check your branch: git diff main...HEAD)"
+  echo "(no changes detected - check your branch: git diff main...HEAD)"
   CHANGED=$(git diff main...HEAD --name-only 2>/dev/null || true)
 fi
 echo "$CHANGED"
@@ -80,16 +125,16 @@ fi
 
 DATA_MODEL_IMPACT=""
 if echo "$SYSTEM_FILES" | grep -q "supabase/migrations/"; then
-  DATA_MODEL_IMPACT="Yes — migration files changed"
+  DATA_MODEL_IMPACT="Yes - migration files changed"
 else
   DATA_MODEL_IMPACT="No"
 fi
 
-cat > "$SUMMARY" <<- SUMMARY_BODY
-# PR Summary — Issue #$ISSUE_NUMBER
+cat > "$SUMMARY" <<-SUMMARY_BODY
+# PR Summary - Issue #$ISSUE_NUMBER
 
 ## Linked Issue
-Closes #$ISSUE_NUMBER — $ISSUE_TITLE
+Closes #$ISSUE_NUMBER - $ISSUE_TITLE
 
 ## What Changed
 <!-- Brief description of the changes -->
@@ -101,6 +146,11 @@ Closes #$ISSUE_NUMBER — $ISSUE_TITLE
 \`\`\`
 $CHANGED
 \`\`\`
+
+## Issue Governance
+- Issue created with rp-issue-create or approved template: $ISSUE_CREATED_WITH_GOVERNANCE
+- Issue audit passed before work: $ISSUE_AUDIT_BEFORE_WORK
+- Missing governance fields corrected: $MISSING_FIELDS_CORRECTED
 
 ## System Impact
 $(printf "$SYSTEM_IMPACT_TEXT")
