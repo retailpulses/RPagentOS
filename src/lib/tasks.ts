@@ -158,6 +158,7 @@ export async function createTask(
       approval_required: input.approval_required ?? false,
       execution_brief: input.execution_brief ?? null,
       created_by: input.created_by ?? 'jim',
+      project_id: input.project_id ?? null,
       metadata: input.metadata ?? {},
     })
     .select()
