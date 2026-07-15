@@ -15,6 +15,7 @@ REQUIRED_SECTIONS=(
   "User Workflow Impact"
   "Data Model Impact"
   "Supabase Impact"
+  "Database Governance"
   "Runtime / Infrastructure Impact"
   "Cloudflare Dependency"
   "Baserow Dependency / Legacy Impact"
@@ -227,6 +228,25 @@ main() {
   if body_mentions "$body_file" 'table|column|schema|model|migration|field'; then
     if section_exists_in_file "$body_file" "Data Model Impact" && section_denies_impact "$body_file" "Data Model Impact"; then
       warnings+=("Data-model keywords found, but Data Model Impact appears to say no impact.")
+    fi
+  fi
+
+  if body_mentions "$body_file" 'migration|schema|table|view|function|rpc|rls|storage|generated.type|access.class|hosted.write|service.role'; then
+    if section_exists_in_file "$body_file" "Database Governance"; then
+      if section_denies_impact "$body_file" "Database Governance"; then
+        warnings+=("Database governance keywords found, but Database Governance appears to say no impact.")
+      fi
+    else
+      warnings+=("Database governance keywords found, but Database Governance section is missing.")
+    fi
+  fi
+
+  # Check ownership: if a non-owner repo proposes schema changes, warn
+  if body_mentions "$body_file" 'schema|migration|table|view|function|alter table|create table'; then
+    if [[ -f "docs/DATABASE_OWNERSHIP.yaml" ]]; then
+      warnings+=("Database schema changes proposed. Verify domain ownership against docs/DATABASE_OWNERSHIP.yaml.")
+    elif [[ -f "docs/16_DATABASE_GOVERNANCE.md" ]]; then
+      warnings+=("Database schema changes proposed. Check central DATABASE_OWNERSHIP.yaml in rp-governance-kit for domain ownership.")
     fi
   fi
 

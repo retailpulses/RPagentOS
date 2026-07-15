@@ -134,10 +134,48 @@ fi
 echo "=== Fetching issue #$ISSUE_NUMBER ==="
 gh issue view "$ISSUE_NUMBER" --json title,body,labels,state > ".tmp/issue-$ISSUE_NUMBER.json"
 gh issue view "$ISSUE_NUMBER" --json title --jq '.title' > ".tmp/issue-$ISSUE_NUMBER-title.txt"
+gh issue view "$ISSUE_NUMBER" --json body --jq '.body // ""' > ".tmp/issue-$ISSUE_NUMBER-body.txt"
 
 TITLE=$(cat ".tmp/issue-$ISSUE_NUMBER-title.txt")
 echo "Issue: #$ISSUE_NUMBER - $TITLE"
 echo ""
+
+# Detect database/schema work from issue body
+IS_DB_WORK=false
+ISSUE_BODY=$(cat ".tmp/issue-$ISSUE_NUMBER-body.txt")
+if echo "$ISSUE_BODY" | grep -Eiq 'supabase|migration|schema|table|view|function|rpc|rls|storage|generated.type|access.class|hosted.write|service.role'; then
+  IS_DB_WORK=true
+  echo "=== Database governance check ==="
+  echo "Database-related keywords detected in issue body."
+
+  if [[ ! -f "docs/12_DATA_ACCESS_AND_SECRETS.md" ]]; then
+    echo "WARN: docs/12_DATA_ACCESS_AND_SECRETS.md not found. Database work requires this document."
+  fi
+
+  if [[ ! -f "docs/16_DATABASE_GOVERNANCE.md" ]]; then
+    echo "FAIL: docs/16_DATABASE_GOVERNANCE.md is not installed."
+    echo "Install the current governance kit before database work:"
+    echo "  (from rp-governance-kit) bin/rp-governance-install <this-repo>"
+    exit 1
+  fi
+
+  # Check for governance ref
+  if [[ -f ".github/governance-ref.txt" ]]; then
+    INSTALLED_REF=$(cat ".github/governance-ref.txt")
+    echo "Installed governance ref: $INSTALLED_REF"
+  else
+    echo "WARN: No .github/governance-ref.txt found. Installed governance version is unknown."
+  fi
+
+  # Check for local declaration
+  if [[ -f "docs/16_DATABASE_GOVERNANCE.local.md" ]]; then
+    echo "Local database declaration: found"
+  else
+    echo "WARN: docs/16_DATABASE_GOVERNANCE.local.md not found. Create it with repository-specific database declarations."
+  fi
+
+  echo ""
+fi
 
 BRIEF=".tmp/agent-work-brief-$ISSUE_NUMBER.md"
 AUDIT_STATUS=$(cat ".tmp/issue-audit-$ISSUE_NUMBER.status" 2>/dev/null || echo "unknown")
@@ -166,6 +204,22 @@ for doc in docs/01_SYSTEM_OVERVIEW.md docs/04_DATA_MODEL.md docs/05_DECISION_LOG
     echo "- [ ] $doc" >> "$BRIEF"
   fi
 done
+
+# Add database governance docs when applicable
+if [[ "$IS_DB_WORK" == true ]]; then
+  for doc in docs/12_DATA_ACCESS_AND_SECRETS.md docs/16_DATABASE_GOVERNANCE.md docs/16_DATABASE_GOVERNANCE.local.md; do
+    if [[ -f "$doc" ]]; then
+      echo "- [ ] $doc" >> "$BRIEF"
+    fi
+  done
+  echo "" >> "$BRIEF"
+  echo "## Database Governance" >> "$BRIEF"
+  echo "" >> "$BRIEF"
+  echo "- Check \`docs/DATABASE_OWNERSHIP.yaml\` in rp-governance-kit for domain ownership." >> "$BRIEF"
+  echo "- If modifying objects owned by another repository, an explicit cross-domain exception is required." >> "$BRIEF"
+  echo "- Migration naming: \`YYYYMMDDHHMMSS_description.sql\` — unique across all Retailpulses repos." >> "$BRIEF"
+  echo "- Every migration must include the required header comment." >> "$BRIEF"
+fi
 
 SAFE_TITLE=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//' | head -c 60)
 BRANCH="issue-$ISSUE_NUMBER-$SAFE_TITLE"

@@ -104,6 +104,55 @@ if [[ "$HAS_SYSTEM_IMPACT" == true && "$HAS_DOCS_CHANGE" == false ]]; then
   echo "    Consider updating docs/00_CURRENT_STATE.md or docs/05_DECISION_LOG.md"
 fi
 
+# Database governance checks
+MIGRATION_FILES=$(echo "$CHANGED" | grep "supabase/migrations/" || true)
+if [[ -n "$MIGRATION_FILES" ]]; then
+  echo ""
+  echo "=== Database Governance Check ==="
+  echo "Migration files changed:"
+  echo "$MIGRATION_FILES"
+
+  echo ""
+  echo "Database governance pre-PR checklist:"
+  echo "  - [ ] Owner confirmed against DATABASE_OWNERSHIP.yaml"
+  echo "  - [ ] Migration timestamp checked (unique across repos)"
+  echo "  - [ ] External consumers assessed"
+  echo "  - [ ] Hosted write performed: yes / no"
+  echo "  - [ ] Backup gate verified (if applicable)"
+  echo "  - [ ] Migration replay checked (local/shadow)"
+  echo "  - [ ] Generated types updated or exemption recorded"
+  echo "  - [ ] RLS / access class reviewed"
+  echo "  - [ ] No secret exposure in migration files"
+  echo "  - [ ] Documentation / decision log updated"
+
+  # Check for likely secrets in migration files
+  if echo "$MIGRATION_FILES" | while read -r f; do
+    if [[ -f "$f" ]]; then
+      grep -Eq 'service_role|eyJ|sbp_[a-z0-9]{32,}|supabase\.co/[a-z]{20,}' "$f" 2>/dev/null
+    fi
+  done; then
+    echo ""
+    echo "!!! WARNING: Possible secrets or project references in migration files !!!"
+    echo "    Remove any service-role keys, project URLs, or access tokens."
+  fi
+
+  # Check for migration header
+  local missing_headers=()
+  while IFS= read -r mf; do
+    if [[ -f "$mf" ]]; then
+      if ! grep -qE '^-- (Domain|Owner|Affected|Change class|Hosted write)' "$mf" 2>/dev/null; then
+        missing_headers+=("$mf")
+      fi
+    fi
+  done <<< "$MIGRATION_FILES"
+  if [[ ${#missing_headers[@]} -gt 0 ]]; then
+    echo ""
+    echo "!!! WARNING: New migration files missing required header:"
+    printf '  - %s\n' "${missing_headers[@]}"
+    echo "    Add: -- Domain: / -- Owner: / -- Affected: / -- Change class: / -- Hosted write required: / -- Consumers:"
+  fi
+fi
+
 echo ""
 
 SUMMARY=".tmp/pr-summary-$ISSUE_NUMBER.md"
@@ -217,6 +266,18 @@ $(printf "$SYSTEM_IMPACT_TEXT")
 
 ## Data Model Impact
 $DATA_MODEL_IMPACT
+
+## Database Governance
+- Owner confirmed: <!-- yes / no / n/a -->
+- Migration timestamp unique: <!-- yes / no / n/a -->
+- External consumers assessed: <!-- yes / no / n/a -->
+- Hosted write performed: <!-- yes / no -->
+- Backup gate verified: <!-- yes / no / n/a -->
+- Migration replay checked: <!-- yes / no / n/a -->
+- Generated types updated: <!-- yes / n/a / exempt -->
+- RLS / access class reviewed: <!-- yes / no / n/a -->
+- No secret exposure: <!-- yes / no -->
+- Decision log updated: <!-- yes / no -->
 
 ## Documentation Updated
 - $([[ "$HAS_DOCS_CHANGE" == true ]] && echo "Yes" || echo "No")
