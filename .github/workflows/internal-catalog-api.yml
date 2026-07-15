@@ -1,0 +1,44 @@
+name: Internal Catalog API
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test and compile internal catalog API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install web dependencies
+        run: npm ci --prefix apps/web
+
+      - name: Run internal API contract tests
+        run: npm run test:internal-api
+
+      - name: Compile handlers and Pages routes
+        run: npm run typecheck:internal-api
+
+      - name: Typecheck repository
+        run: npm run typecheck:all
+
+      - name: Build web app
+        run: npm run web:build

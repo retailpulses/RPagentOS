@@ -1,0 +1,24 @@
+{
+  "request": {
+    "item_codes": [
+      "n511p407695w",
+      "N511P407695B"
+    ]
+  },
+  "response": {
+    "results": [
+      {
+        "requested_item_code": "n511p407695w",
+        "item_code": "N511P407695W",
+        "source_available_qty": 0,
+        "sync_status": "synced",
+        "last_sync_success_at": "2026-07-15T06:54:00.000Z"
+      },
+      {
+        "requested_item_code": "N511P407695B",
+        "item_code": "N511P407695B",
+        "error": "sync_not_ready"
+      }
+    ]
+  }
+}
