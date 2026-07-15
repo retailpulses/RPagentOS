@@ -9,4 +9,4 @@ on:
 
 jobs:
   database-governance:
-    uses: retailpulses/rp-governance-kit/.github/workflows/database-governance-checks.yml@v1.1.0
+    uses: retailpulses/rp-governance-kit/.github/workflows/database-governance-checks.yml@issue-10-runtime-database-safety

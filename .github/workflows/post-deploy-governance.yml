@@ -19,7 +19,7 @@ on:
 
 jobs:
   post-deploy-governance:
-    uses: retailpulses/rp-governance-kit/.github/workflows/post-deploy-governance.yml@v1.1.0
+    uses: retailpulses/rp-governance-kit/.github/workflows/post-deploy-governance.yml@issue-10-runtime-database-safety
     with:
       environment: ${{ inputs.environment }}
       deployed_target: ${{ inputs.deployed_target }}
