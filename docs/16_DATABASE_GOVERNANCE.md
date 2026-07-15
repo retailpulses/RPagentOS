@@ -2,16 +2,16 @@
 
 This file is the repository-local entrypoint for Retailpulses database governance. It is installed and updated by `rp-governance-kit`.
 
-**Canonical policy:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_GOVERNANCE.md`](https://github.com/retailpulses/rp-governance-kit/blob/issue-10-runtime-database-safety/docs/DATABASE_GOVERNANCE.md)
+**Canonical policy:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_GOVERNANCE.md`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_GOVERNANCE.md)
 
-**Canonical workload registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_WORKLOADS.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/issue-10-runtime-database-safety/docs/DATABASE_WORKLOADS.yaml)
+**Canonical workload registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_WORKLOADS.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_WORKLOADS.yaml)
 
-**Canonical incident response:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_INCIDENT_RESPONSE.md`](https://github.com/retailpulses/rp-governance-kit/blob/issue-10-runtime-database-safety/docs/DATABASE_INCIDENT_RESPONSE.md)
+**Canonical incident response:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_INCIDENT_RESPONSE.md`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_INCIDENT_RESPONSE.md)
 
-**Canonical ownership registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_OWNERSHIP.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/issue-10-runtime-database-safety/docs/DATABASE_OWNERSHIP.yaml)
+**Canonical ownership registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_OWNERSHIP.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_OWNERSHIP.yaml)
 
-**Installed governance ref:** `issue-10-runtime-database-safety`
-**Installed at:** `2026-07-15T15:49:21Z`
+**Installed governance ref:** `main`
+**Installed at:** `2026-07-15T15:51:34Z`
 
 ---
 
