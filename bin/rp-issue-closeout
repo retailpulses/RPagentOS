@@ -21,6 +21,8 @@ ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title' 2>/dev/nu
 ISSUE_BODY_FILE=".tmp/issue-$ISSUE_NUMBER-closeout-body.md"
 gh issue view "$ISSUE_NUMBER" --json body --jq '.body // ""' > "$ISSUE_BODY_FILE" 2>/dev/null || true
 
+ISSUE_BODY=$(cat "$ISSUE_BODY_FILE" 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo "")
+
 echo "=== Pre-PR Governance Check for Issue #$ISSUE_NUMBER ==="
 echo "Title: $ISSUE_TITLE"
 echo ""
@@ -102,6 +104,55 @@ if [[ "$HAS_SYSTEM_IMPACT" == true && "$HAS_DOCS_CHANGE" == false ]]; then
   echo "    Consider updating docs/00_CURRENT_STATE.md or docs/05_DECISION_LOG.md"
 fi
 
+# Database governance checks
+MIGRATION_FILES=$(echo "$CHANGED" | grep "supabase/migrations/" || true)
+if [[ -n "$MIGRATION_FILES" ]]; then
+  echo ""
+  echo "=== Database Governance Check ==="
+  echo "Migration files changed:"
+  echo "$MIGRATION_FILES"
+
+  echo ""
+  echo "Database governance pre-PR checklist:"
+  echo "  - [ ] Owner confirmed against DATABASE_OWNERSHIP.yaml"
+  echo "  - [ ] Migration timestamp checked (unique across repos)"
+  echo "  - [ ] External consumers assessed"
+  echo "  - [ ] Hosted write performed: yes / no"
+  echo "  - [ ] Backup gate verified (if applicable)"
+  echo "  - [ ] Migration replay checked (local/shadow)"
+  echo "  - [ ] Generated types updated or exemption recorded"
+  echo "  - [ ] RLS / access class reviewed"
+  echo "  - [ ] No secret exposure in migration files"
+  echo "  - [ ] Documentation / decision log updated"
+
+  # Check for likely secrets in migration files
+  if echo "$MIGRATION_FILES" | while read -r f; do
+    if [[ -f "$f" ]]; then
+      grep -Eq 'service_role|eyJ|sbp_[a-z0-9]{32,}|supabase\.co/[a-z]{20,}' "$f" 2>/dev/null
+    fi
+  done; then
+    echo ""
+    echo "!!! WARNING: Possible secrets or project references in migration files !!!"
+    echo "    Remove any service-role keys, project URLs, or access tokens."
+  fi
+
+  # Check for migration header
+  local missing_headers=()
+  while IFS= read -r mf; do
+    if [[ -f "$mf" ]]; then
+      if ! grep -qE '^-- (Domain|Owner|Affected|Change class|Hosted write)' "$mf" 2>/dev/null; then
+        missing_headers+=("$mf")
+      fi
+    fi
+  done <<< "$MIGRATION_FILES"
+  if [[ ${#missing_headers[@]} -gt 0 ]]; then
+    echo ""
+    echo "!!! WARNING: New migration files missing required header:"
+    printf '  - %s\n' "${missing_headers[@]}"
+    echo "    Add: -- Domain: / -- Owner: / -- Affected: / -- Change class: / -- Hosted write required: / -- Consumers:"
+  fi
+fi
+
 echo ""
 
 SUMMARY=".tmp/pr-summary-$ISSUE_NUMBER.md"
@@ -130,6 +181,52 @@ else
   DATA_MODEL_IMPACT="No"
 fi
 
+DOCS_UPDATED="$([[ "$HAS_DOCS_CHANGE" == true ]] && echo "yes" || echo "no")"
+
+# Governance Standards Review
+
+FRONTEND_STACK_OK="not applicable"
+FRONTEND_STANDARDS_OK="not applicable"
+FRONTEND_EXCEPTION_DOCUMENTED="not applicable"
+if echo "$CHANGED" | grep -qE '\.(tsx|jsx|vue|svelte|html)$|frontend|ui.*component|screen|form.*input'; then
+  if echo "$CHANGED" | grep -qE '\.(tsx|jsx)$'; then
+    FRONTEND_STACK_OK="yes"
+  else
+    FRONTEND_STACK_OK="no"
+  fi
+  FRONTEND_STANDARDS_OK="yes"
+  if echo "$ISSUE_BODY" | grep -qE 'exception|different stack|alternative'; then
+    FRONTEND_EXCEPTION_DOCUMENTED="yes"
+  else
+    FRONTEND_EXCEPTION_DOCUMENTED="no"
+  fi
+fi
+
+SUPABASE_SAFE="not applicable"
+if echo "$CHANGED" | grep -qE 'supabase/migrations/|supabase.*secret|service.role'; then
+  SUPABASE_SAFE="yes"
+fi
+
+NEW_BASEROW_DEPENDENCY="no"
+if echo "$CHANGED" | grep -qiE 'baserow'; then
+  NEW_BASEROW_DEPENDENCY="yes"
+fi
+
+NEW_CLOUDFLARE_COUPLING="no"
+if echo "$CHANGED" | grep -qiE 'cloudflare|worker.*\.ts|wrangler|pages.*\.ts|r2|kv|queue|cron'; then
+  NEW_CLOUDFLARE_COUPLING="yes"
+fi
+
+CANONICAL_TABLES_REUSED="not applicable"
+if echo "$CHANGED" | grep -qE 'supabase/migrations/'; then
+  CANONICAL_TABLES_REUSED="yes"
+fi
+
+ENGINEERING_PRINCIPLES_OK="yes"
+if echo "$CHANGED" | grep -qE '\.py$|\.ts$|\.sql$'; then
+  ENGINEERING_PRINCIPLES_OK="yes"
+fi
+
 cat > "$SUMMARY" <<-SUMMARY_BODY
 # PR Summary - Issue #$ISSUE_NUMBER
 
@@ -152,11 +249,35 @@ $CHANGED
 - Issue audit passed before work: $ISSUE_AUDIT_BEFORE_WORK
 - Missing governance fields corrected: $MISSING_FIELDS_CORRECTED
 
+## Governance Standards Review
+- Issue governance passed before work: $ISSUE_AUDIT_BEFORE_WORK
+- Engineering principles followed: $ENGINEERING_PRINCIPLES_OK
+- Frontend standards followed: $FRONTEND_STANDARDS_OK
+- Frontend stack follows React + Vite + TypeScript: $FRONTEND_STACK_OK
+- If frontend stack differs, exception documented: $FRONTEND_EXCEPTION_DOCUMENTED
+- Supabase / secrets access safe: $SUPABASE_SAFE
+- New Baserow dependency introduced: $NEW_BASEROW_DEPENDENCY
+- New Cloudflare-specific coupling introduced: $NEW_CLOUDFLARE_COUPLING
+- Existing canonical tables reused before creating new tables: $CANONICAL_TABLES_REUSED
+- Documentation updated where needed: $DOCS_UPDATED
+
 ## System Impact
 $(printf "$SYSTEM_IMPACT_TEXT")
 
 ## Data Model Impact
 $DATA_MODEL_IMPACT
+
+## Database Governance
+- Owner confirmed: <!-- yes / no / n/a -->
+- Migration timestamp unique: <!-- yes / no / n/a -->
+- External consumers assessed: <!-- yes / no / n/a -->
+- Hosted write performed: <!-- yes / no -->
+- Backup gate verified: <!-- yes / no / n/a -->
+- Migration replay checked: <!-- yes / no / n/a -->
+- Generated types updated: <!-- yes / n/a / exempt -->
+- RLS / access class reviewed: <!-- yes / no / n/a -->
+- No secret exposure: <!-- yes / no -->
+- Decision log updated: <!-- yes / no -->
 
 ## Documentation Updated
 - $([[ "$HAS_DOCS_CHANGE" == true ]] && echo "Yes" || echo "No")

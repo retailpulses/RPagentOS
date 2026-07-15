@@ -9,4 +9,4 @@ on:
 
 jobs:
   governance:
-    uses: retailpulses/rp-governance-kit/.github/workflows/governance-checks.yml@main
+    uses: retailpulses/rp-governance-kit/.github/workflows/governance-checks.yml@v1.1.0
