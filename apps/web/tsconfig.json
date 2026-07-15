@@ -18,8 +18,7 @@
     "paths": {
       "@lib/*": ["../../src/lib/*"],
       "@packages/*": ["../../src/packages/*"]
-    },
-    "baseUrl": "."
+    }
   },
   "include": ["src"]
 }
