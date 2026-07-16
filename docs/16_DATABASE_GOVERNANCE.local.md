@@ -22,6 +22,21 @@ Last updated: 2026-07-15
 
 - `ticketing` (owned by ticket-handling) — tickets (for task linking)
 
+## CatalogSync Mercari shop4 Read Boundary
+
+RPagentOS owns the additive database objects that authorize the CatalogSync
+shop4 MVP's direct, read-only PostgREST access:
+
+- role `catalogsync_shop4_reader` — NOLOGIN, NOBYPASSRLS, 20-second statement
+  timeout, granted to PostgREST `authenticator`
+- view `catalogsync_mercari_shop4_listing_map_v1` — filters listing mappings to
+  the active Mercari `shop4` account
+- view `catalogsync_mercari_shop4_catalog_v1` — exposes only the catalog columns
+  required for inventory, presale, shipping, and future pricing review
+
+The role has no base-table privilege and no write privilege. CatalogSync owns no
+schema object and must not receive `service_role`.
+
 ## Generated Types
 
 **Exempt.** The Worker is the sole Supabase client. Types are generated from API route signatures.
