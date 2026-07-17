@@ -37,6 +37,31 @@ shop4 MVP's direct, read-only PostgREST access:
 The role has no base-table privilege and no write privilege. CatalogSync owns no
 schema object and must not receive `service_role`.
 
+## CatalogSync Amazon/Rakuten Marketplace Projection Boundary
+
+RPagentOS owns the additive database objects used by the CatalogSync-owned
+marketplace projection API:
+
+- role `catalogsync_marketplace_reader` — `NOLOGIN`, `NOBYPASSRLS`, ten-second
+  statement timeout, selectable by PostgREST `authenticator` only;
+- view `catalogsync_marketplace_projection_v1` — a security-barrier projection
+  joining canonical variant, commercial, listing, listing-SKU, account, and
+  product-platform mapping records for Amazon and Rakuten.
+
+The role has `USAGE` on `public` and `SELECT` on this view only. It has no base
+table, function, sequence, schema-create, or write privileges. CatalogSync owns
+the marketplace-specific HTTP API and its scope/completeness rules, but owns no
+Supabase object and must not receive `service_role`.
+
+The complete access path is:
+
+```text
+Amazon/Rakuten VPS consumers
+  -> CatalogSync marketplace projection API (`internal_api`)
+  -> catalogsync_marketplace_projection_v1 (`postgrest`, read-only)
+  -> RPagentOS-owned product_catalog tables
+```
+
 ## Generated Types
 
 **Exempt.** The Worker is the sole Supabase client. Types are generated from API route signatures.
