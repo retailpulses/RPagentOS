@@ -1,0 +1,14 @@
+-- Remote migration history alignment artifact.
+--
+-- Version 20260717120001 is already applied to the shared hosted Supabase
+-- project (retailpulses_shared). Untracked file copies exist in the
+-- RPagentOS working tree.
+--
+-- Source repository:  retailpulses/RPagentOS (presumed — hosted hash not verified)
+-- Domain owner:       product_catalog (per DATABASE_OWNERSHIP.yaml)
+--
+-- This file intentionally contains no DDL and makes no ownership claim.
+-- It exists solely to prevent the RPagentOS deployment workflow from
+-- marking a valid remote migration as reverted.
+--
+-- Reconciliation: retailpulses/RPagentOS#32
