@@ -76,8 +76,8 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 
 ## Supabase CLI Version
 
-- Local (Homebrew): check with `supabase --version`
-- CI: not yet pinned — record when configured
+- Local (Homebrew): `2.109.1`
+- CI migration deploy: `2.109.1`
 
 ## Known Technical Debt
 
