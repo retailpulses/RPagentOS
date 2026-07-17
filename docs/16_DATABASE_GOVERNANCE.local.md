@@ -53,6 +53,13 @@ table, function, sequence, schema-create, or write privileges. CatalogSync owns
 the marketplace-specific HTTP API and its scope/completeness rules, but owns no
 Supabase object and must not receive `service_role`.
 
+The dedicated Supabase Auth workload identity
+`053bd1a5-d9d1-4395-9ed5-3239dc9f62e4` is mapped to
+`catalogsync_marketplace_reader` by the owner-managed custom access-token hook.
+CatalogSync stores only that identity's credentials and the public anon API key;
+it obtains short-lived JWTs at runtime. Unknown Auth identities retain their
+original claims, and the existing shop4 identity mapping remains unchanged.
+
 The complete access path is:
 
 ```text
