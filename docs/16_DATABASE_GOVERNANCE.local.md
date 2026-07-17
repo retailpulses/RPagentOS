@@ -96,13 +96,25 @@ no schema object and must not receive `service_role`.
 The existing shop4 views and `catalogsync_shop4_reader` role are preserved and
 unaffected by these additions.
 
-### Follow-up: Auth workload identities
+### Auth workload identity UUIDs
 
-Supabase Auth workload identities (one UUID per shop) must be created in the
-Auth dashboard or via the Auth Admin API. The custom access-token hook
-(`catalogsync_shop4_custom_access_token_hook`) must then be extended to map
-each new identity UUID to its reader role. This migration does not create
-identities or invent UUIDs — that is a separate, required follow-up step.
+Each Mercari shop and the marketplace workload have dedicated Supabase Auth
+identities mapped to their reader roles by the owner-managed custom access-token
+hook. These are non-secret identity UUIDs (public identifiers in the Auth
+identity provider, not credentials).
+
+| UUID | Reader role | Created by |
+|------|-------------|------------|
+| `a2ef2824-de7a-456a-99c0-23f751635c00` | `catalogsync_shop4_reader` | `20260716123000` |
+| `053bd1a5-d9d1-4395-9ed5-3239dc9f62e4` | `catalogsync_marketplace_reader` | `20260717050000` |
+| `f2214383-6188-42ea-8d42-7dd31b97dc69` | `catalogsync_shop1_reader` | `20260717110000` |
+| `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` | `catalogsync_shop2_reader` | `20260717110000` |
+| `1fdd359b-239b-4531-a38b-bb779e56d116` | `catalogsync_shop3_reader` | `20260717110000` |
+
+The hook function `catalogsync_shop4_custom_access_token_hook` returns the event
+unchanged for any `user_id` not in the CASE list, so unknown Auth identities
+retain their original claims. CatalogSync stores only each identity's
+credentials and the public anon API key; it obtains short-lived JWTs at runtime.
 
 ### Access path
 
@@ -136,3 +148,9 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 - Duplicate migrations `20260708000002` and `20260708000003` exist in both this repo and ticket-handling (near-identical). This repo is the canonical owner.
 - `20260707000000_remote_history_baseline.sql` is a history alignment artifact
 - No-RLS MVP pattern for listing_work_items (anon key writes) — documented debt
+
+## Changelog
+
+| Date | Change | Author | Migration |
+|------|--------|--------|-----------|
+| 2026-07-17 | Extended custom access-token hook to map shops 1-3 identity UUIDs: `f2214383-6188-42ea-8d42-7dd31b97dc69` → `catalogsync_shop1_reader`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` → `catalogsync_shop2_reader`, `1fdd359b-239b-4531-a38b-bb779e56d116` → `catalogsync_shop3_reader`. Resolves CatalogSync issue #34 owner-side follow-up. | RPagentOS | `20260717110000_catalogsync_shop1_3_auth_identity.sql` |
