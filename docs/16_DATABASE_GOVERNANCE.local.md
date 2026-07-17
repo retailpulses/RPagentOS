@@ -126,6 +126,73 @@ shop1/2/3 VPS consumers
   -> RPagentOS-owned product_catalog tables (indirectly, through views only)
 ```
 
+## Owner-Side Backfill Tool: `scripts/backfill_mercari_listings_from_api.py`
+
+### Purpose
+
+Backfill `platform_listings` and `platform_listing_skus` rows for Mercari
+shops 1-3 from the Mercari Shops GraphQL API.  Triggered when
+`platform_accounts` has the shop records but the listing/SKU tables are empty
+(for example, after a fresh CatalogSync issue #34 authentication setup).
+
+### Rollback
+
+If the backfill produces incorrect data:
+
+1. Identify the affected rows via the JSON report's
+   `candidate_external_listing_ids` values.
+2. Delete **only** the rows that the tool created, using the report timestamps
+   or the listing IDs:
+
+   ```sql
+   -- Find inserted rows (using report listing_ids)
+   SELECT id, external_listing_id FROM platform_listings
+   WHERE platform = 'mercari'
+     AND shop_code = '<shop_code>'
+     AND external_listing_id IN (<report listing IDs>);
+
+   -- Delete SKUs first (CASCADE from listing deletion avoids this,
+   -- but explicit order is safer for audit)
+   DELETE FROM platform_listing_skus
+   WHERE listing_id IN (
+     SELECT id FROM platform_listings
+     WHERE platform = 'mercari'
+       AND shop_code = '<shop_code>'
+       AND external_listing_id IN (<report listing IDs>)
+   );
+
+   DELETE FROM platform_listings
+   WHERE platform = 'mercari'
+     AND shop_code = '<shop_code>'
+     AND external_listing_id IN (<report listing IDs>);
+   ```
+
+3. Verify zero rows remain for those external_listing_ids.
+4. Do NOT use `TRUNCATE` unless the shop has zero legitimate rows.
+
+### Audit
+
+Run the dry-report (`--report path`) first.  The JSON report contains:
+
+- `mercari_api.products_count` / `total_variants_count` — source truth
+- `source_db.product_variants_with_item_code` — mapping coverage
+- `candidates.listings` / `candidates.skus` — what would be written
+- `unresolved_skus` — SKU codes with no matching `product_variants.item_code`
+- `existing.listings_count` — pre-existing rows (dry-run only)
+
+An audit-pass criterion: the report should show zero or an expected number of
+`unresolved_skus`, and `candidates.listings` should match the known Mercari
+product count for the shop.  Investigate any sudden increase in unresolved SKUs
+before running `--apply`.
+
+### Credential requirements
+
+| Variable | Required for |
+|---|---|
+| `MERCARI_ACCESS_TOKEN` | Always |
+| `SUPABASE_URL` | `--apply` and read-audit (account + variant map) |
+| `SUPABASE_SERVICE_ROLE_KEY` | `--apply` and read-audit |
+
 ## Generated Types
 
 **Exempt.** The Worker is the sole Supabase client. Types are generated from API route signatures.
@@ -155,3 +222,4 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 |------|--------|--------|-----------|
 | 2026-07-17 | Extended custom access-token hook to map shops 1-3 identity UUIDs: `f2214383-6188-42ea-8d42-7dd31b97dc69` → `catalogsync_shop1_reader`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` → `catalogsync_shop2_reader`, `1fdd359b-239b-4531-a38b-bb779e56d116` → `catalogsync_shop3_reader`. Resolves CatalogSync issue #34 owner-side follow-up. *Corrected by `20260717120000` — these UUIDs were local-only and never valid in hosted.* | RPagentOS | `20260717110000_catalogsync_shop1_3_auth_identity.sql` |
 | 2026-07-17 | Forward correction: replaced local-only shops 1-3 Auth UUIDs with actual hosted identities. Preserved shop4 and marketplace mappings. Removed invalid `f2214383-6188-42ea-8d42-7dd31b97dc69`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1`, `1fdd359b-239b-4531-a38b-bb779e56d116`. Applied `865a076c-cd9f-4fba-9fd2-4ff0a155f2c7` → `catalogsync_shop1_reader`, `a531e2ee-be44-4c7f-87da-7c1d0f75494f` → `catalogsync_shop2_reader`, `31a4c8c5-f8dc-40a8-813c-e7939a4e16d3` → `catalogsync_shop3_reader`. | RPagentOS | `20260717120000_fix_local_auth_identities.sql` |
+| 2026-07-17 | Added `scripts/backfill_mercari_listings_from_api.py` and `tests/test_backfill_mercari_listings_from_api.py`. Owner-side backfill for CatalogSync issue #34. Python stdlib, dry-run default, Mercari GraphQL pagination, PostgREST upsert into `platform_listings` + `platform_listing_skus`. Rollback/audit docs added to this section above. | RPagentOS | N/A (operational script) |
