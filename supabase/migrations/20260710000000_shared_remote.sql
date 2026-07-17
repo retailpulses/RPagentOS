@@ -1,0 +1,28 @@
+-- Remote migration history alignment artifact.
+-- Domain: ticketing
+-- Owner: retailpulses/ticket-handling
+-- Cross-domain exception: retailpulses/RPagentOS#32
+-- Affected: supabase_migrations.schema_migrations history alignment only
+-- Change class: history_alignment
+-- Hosted write required: no
+-- Consumers: RPagentOS migration tooling
+--
+-- Version 20260710000000 is already applied to the shared hosted Supabase
+-- project.
+--
+-- ⚠️  VERSION COLLISION: Two repositories authored different SQL under the
+-- same timestamp, violating the "unique across all Retailpulses repos" rule.
+--
+--   retailpulses/ticket-handling: 20260710000000_inbound_ticket_messages.sql
+--     SHA-256: 71d62f9a...  Domain: ticketing
+--   retailpulses/OrderMgmt:       20260710000000_order_mgmt_core.sql
+--     SHA-256: 5b9ed77...  Domain: order_management
+--
+-- Both are already present on the hosted database. This collision is
+-- documented in DATABASE_OWNERSHIP.yaml. Do not rename either migration
+-- without a reviewed cross-repo reconciliation plan.
+--
+-- This placeholder acknowledges the hosted version without claiming
+-- ownership of either source.
+--
+-- Reconciliation: retailpulses/RPagentOS#32

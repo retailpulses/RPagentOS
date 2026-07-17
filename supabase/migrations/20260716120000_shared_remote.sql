@@ -1,0 +1,22 @@
+-- Remote migration history alignment artifact.
+-- Domain: order_management
+-- Owner: retailpulses/OrderMgmt
+-- Cross-domain exception: retailpulses/RPagentOS#32
+-- Affected: supabase_migrations.schema_migrations history alignment only
+-- Change class: history_alignment
+-- Hosted write required: no
+-- Consumers: RPagentOS migration tooling
+--
+-- Version 20260716120000 is already applied to the shared hosted Supabase
+-- project (retailpulses_shared) and was authored outside this RPagentOS
+-- migration ledger.
+--
+-- Source repository:  retailpulses/OrderMgmt
+-- Domain owner:       order_management (DATABASE_OWNERSHIP.yaml)
+--
+-- This file intentionally contains no DDL and makes no ownership claim.
+-- It exists solely to prevent the RPagentOS deployment workflow from
+-- marking a valid remote migration as reverted or attempting to replay
+-- another repository's schema change.
+--
+-- Reconciliation: retailpulses/RPagentOS#32
