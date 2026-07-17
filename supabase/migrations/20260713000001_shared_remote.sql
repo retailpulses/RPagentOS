@@ -1,4 +1,10 @@
 -- Remote migration history alignment artifact.
+-- Domain: ticketing
+-- Owner: retailpulses/ticket-handling
+-- Affected: supabase_migrations.schema_migrations history alignment only
+-- Change class: history_alignment
+-- Hosted write required: no
+-- Consumers: RPagentOS migration tooling
 --
 -- Version 20260713000001 is already applied to the shared hosted Supabase
 -- project (retailpulses_shared) and was authored outside this RPagentOS

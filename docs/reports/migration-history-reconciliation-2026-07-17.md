@@ -50,7 +50,7 @@ Each remote-only version was traced to its owning repository using content hashe
 |---|---------|--------|--------------------------|----------|-------------------|--------------|----------------|
 | 1 | `0001` | present | `retailpulses/ticket-handling` | `0001_ticketing_mvp_core.sql` | `eb4fd26d` | ticketing | Foreign — ticket-handling grandfathered sequential |
 | 2 | `0002` | present | `retailpulses/ticket-handling` | `0002_ticketing_hotfix_issue_types.sql` | `952fc62a` | ticketing | Foreign — ticket-handling grandfathered sequential |
-| 3 | `20260708000002` | present | **`retailpulses/RPagentOS`** | `20260708000002_listing_review_schedule_status.sql` | `d612a10f` (RPagentOS canonical) / `fa87459d` (ticket copy) | **Hosted hash matches RPagentOS canonical** (confirmed via `schema_migrations` dump) | **RPagentOS / listing_quality** | RPagentOS-owned; applied from RPagentOS (not ticket-handling); file was missing from `main` — restored in this PR |
+| 3 | `20260708000002` | present | **`retailpulses/RPagentOS`** | `20260708000002_listing_review_schedule_status.sql` | `d612a10f` (authoritative pre-governance-header content) / `fa87459d` (ticket copy) | **Hosted content matches RPagentOS canonical** (confirmed via `schema_migrations` dump) | **RPagentOS / listing_quality** | RPagentOS-owned; applied from RPagentOS (not ticket-handling); file was missing from `main` — restored with required governance headers in this PR |
 | 4 | `20260709000000` | present | `retailpulses/ticket-handling` | `20260709000000_ticketing_mvp_core.sql` | `ea553a16` | ticketing | Foreign — ticket-handling |
 | 5 | `20260709000001` | present | `retailpulses/ticket-handling` | `20260709000001_copywriting_tables.sql` | `1ff7213d` | ticketing | Foreign — ticket-handling |
 | 6 | `20260709000100` | present | `retailpulses/ticket-handling` | `20260709000100_ticketing_mvp_hardening.sql` | `b67609d8` | ticketing | Foreign — ticket-handling |
@@ -164,12 +164,12 @@ These identities are authoritative — they come from the hosted database, not f
 
 This migration creates the `listing_review_schedule_status_v1` view in the `listing_quality` domain (owned by RPagentOS). Two near-identical copies exist:
 
-- **RPagentOS** (`d612a10f`): 2,493 bytes, no extra blank lines between GRANT statements
+- **RPagentOS authoritative source** (`d612a10f` before required governance headers): 2,493 bytes, no extra blank lines between GRANT statements
 - **ticket-handling** (`fa87459d`): 2,497 bytes, two extra blank lines between GRANT statements
 
 **Hosted identity confirmed:** The `schema_migrations` dump shows the hosted hash begins with `"Listing Quality Engineering: editable schedule status."` — this is the RPagentOS canonical header, not the ticket-handling copy. The RPagentOS version was applied to the remote, but the migration file was missing from RPagentOS `main`. It existed only as an untracked working-tree file on the `chore/install-governance-kit` branch.
 
-**Resolution:** The canonical RPagentOS file has been restored to `supabase/migrations/20260708000002_listing_review_schedule_status.sql` (SHA-256 `d612a10f`). No `_shared_remote.sql` placeholder is needed — this is an RPagentOS-owned and RPagentOS-applied migration. The dry-run confirms the CLI matches it correctly against the remote hash.
+**Resolution:** The canonical RPagentOS SQL body has been restored to `supabase/migrations/20260708000002_listing_review_schedule_status.sql` and augmented only with the required governance comment headers (current SHA-256 `bbc9d405`; authoritative pre-header SHA-256 `d612a10f`). No `_shared_remote.sql` placeholder is needed — this is an RPagentOS-owned and RPagentOS-applied migration. The dry-run confirms the CLI matches it by version without replaying it.
 
 ### 5.2 `20260710000000` — Version collision
 
@@ -207,7 +207,7 @@ The hosted schema may contain objects created by this migration. Without hosted 
 
 Add files for all 21 remote-only versions so that every hosted migration has a corresponding local file:
 
-- **1 real migration restored**: `20260708000002_listing_review_schedule_status.sql` — RPagentOS canonical file (SHA-256 `d612a10f`), confirmed to match the hosted hash
+- **1 real migration restored**: `20260708000002_listing_review_schedule_status.sql` — RPagentOS canonical SQL body (authoritative pre-header SHA-256 `d612a10f`; current governed file `bbc9d405`), confirmed from hosted ledger content
 - **20 `_shared_remote.sql` placeholders**: SQL-comment-only files acknowledging foreign-owned or orphaned migrations
 
 | Version | Local file | Template | Notes |
@@ -344,6 +344,7 @@ This PR resolves only step 1. Each subsequent step requires independent review a
 |------|---------|--------|--------|
 | 2026-07-17 | 1.0 | Claude (via jim-young) | Initial reconciliation plan |
 | 2026-07-17 | 1.1 | Claude (via jim-young) | Hosted `schema_migrations` identity verification; `20260708000002` confirmed RPagentOS-applied; `20260710000000` identity resolved to `inbound_ticket_messages`; `20260716010000` domain confirmed as ticketing; dry-run verified passing |
+| 2026-07-17 | 1.2 | Codex | Added required governance headers and distinguished authoritative pre-header hashes from current governed file hashes |
 
 ---
 

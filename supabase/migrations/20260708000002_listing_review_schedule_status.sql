@@ -1,4 +1,10 @@
 -- Listing Quality Engineering: editable schedule status.
+-- Domain: listing_quality
+-- Owner: retailpulses/RPagentOS
+-- Affected: listing_review_policies, listing_review_schedule_status_v1
+-- Change class: additive
+-- Hosted write required: already_applied_history_restoration
+-- Consumers: RPagentOS listing-quality jobs and operator UI
 --
 -- Schedules live in listing_review_policies. This migration adds operator-visible
 -- run status columns and a read-friendly Supabase view for checking schedules.
