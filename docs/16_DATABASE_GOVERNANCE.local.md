@@ -69,6 +69,51 @@ Amazon/Rakuten VPS consumers
   -> RPagentOS-owned product_catalog tables
 ```
 
+## CatalogSync Mercari Shops 1-3 Read Boundaries
+
+RPagentOS owns the additive database objects that authorize the CatalogSync
+Mercari shops 1-3 direct read-only PostgREST access:
+
+- role `catalogsync_shop1_reader` — `NOLOGIN`, `NOBYPASSRLS`, 20-second
+  statement timeout, selectable by PostgREST `authenticator` only
+- role `catalogsync_shop2_reader` — same configuration
+- role `catalogsync_shop3_reader` — same configuration
+- view `catalogsync_mercari_listing_map_v1` — shared security-barrier
+  listing-map view that uses `current_user` (set by PostgREST from the JWT
+  `role` claim) to isolate each shop's rows. NOT RLS; a view-level role gate.
+- view `catalogsync_mercari_catalog_v1` — column-limited canonical
+  catalog projection shared by all three roles
+
+Each role has `USAGE` on `public` and `SELECT` on the two shared views only.
+Explicit `REVOKE` statements prevent role-specific base-table, write, function,
+sequence, and schema-create grants as defense-in-depth. PostgreSQL privileges
+inherited from `PUBLIC` remain governed centrally; this workload receives no
+explicit function grant and does not call RPC functions.
+
+The roles have no base-table privilege and no write privilege. CatalogSync owns
+no schema object and must not receive `service_role`.
+
+The existing shop4 views and `catalogsync_shop4_reader` role are preserved and
+unaffected by these additions.
+
+### Follow-up: Auth workload identities
+
+Supabase Auth workload identities (one UUID per shop) must be created in the
+Auth dashboard or via the Auth Admin API. The custom access-token hook
+(`catalogsync_shop4_custom_access_token_hook`) must then be extended to map
+each new identity UUID to its reader role. This migration does not create
+identities or invent UUIDs — that is a separate, required follow-up step.
+
+### Access path
+
+```text
+shop1/2/3 VPS consumers
+  -> PostgREST (`postgrest`, read-only via JWT for shopX)
+  -> catalogsync_mercari_listing_map_v1 or
+     catalogsync_mercari_catalog_v1
+  -> RPagentOS-owned product_catalog tables (indirectly, through views only)
+```
+
 ## Generated Types
 
 **Exempt.** The Worker is the sole Supabase client. Types are generated from API route signatures.
