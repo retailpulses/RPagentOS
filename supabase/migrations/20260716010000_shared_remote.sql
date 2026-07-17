@@ -1,0 +1,15 @@
+-- Remote migration history alignment artifact.
+--
+-- Version 20260716010000 is already applied to the shared hosted Supabase
+-- project but no authoritative migration source has been found in ANY
+-- Retailpulses repository.
+--
+-- Classification: ORPHANED
+-- Searched repos:  RPagentOS, ticket-handling, OrderMgmt, CatalogSync,
+--                   rp-governance-kit
+-- Content hash:     Not recoverable without hosted schema inspection
+--
+-- If this migration's source is later identified, replace this placeholder
+-- with the authoritative file and update DATABASE_OWNERSHIP.yaml.
+--
+-- Reconciliation: retailpulses/RPagentOS#32

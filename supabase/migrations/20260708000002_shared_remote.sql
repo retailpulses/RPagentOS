@@ -1,0 +1,19 @@
+-- Remote migration history alignment artifact.
+--
+-- Version 20260708000002 (listing_review_schedule_status) is already applied
+-- to the shared hosted Supabase project.
+--
+-- ⚠️  OWNERSHIP NOTE: This migration is OWNED by retailpulses/RPagentOS
+-- (listing_quality domain per DATABASE_OWNERSHIP.yaml). The authoritative
+-- migration file exists in this repository as:
+--   20260708000002_listing_review_schedule_status.sql
+--
+-- The hosted schema_migrations hash was recorded from a near-identical copy
+-- in retailpulses/ticket-handling (trailing-whitespace diff only). A
+-- follow-up repair should replace this placeholder with the canonical
+-- RPagentOS file and repair the remote hash.
+--
+-- This placeholder prevents the deployment workflow from failing on a
+-- version whose DDL is already present on the hosted database.
+--
+-- Reconciliation: retailpulses/RPagentOS#32
