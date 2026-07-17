@@ -1,6 +1,7 @@
 -- Remote migration history alignment artifact.
 -- Domain: ticketing
 -- Owner: retailpulses/ticket-handling
+-- Cross-domain exception: retailpulses/RPagentOS#32
 -- Affected: supabase_migrations.schema_migrations history alignment only
 -- Change class: history_alignment
 -- Hosted write required: no
