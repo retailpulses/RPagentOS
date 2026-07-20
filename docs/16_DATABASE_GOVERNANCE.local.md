@@ -46,7 +46,9 @@ marketplace projection API:
   statement timeout, selectable by PostgREST `authenticator` only;
 - view `catalogsync_marketplace_projection_v1` — a security-barrier projection
   joining canonical variant, commercial, listing, listing-SKU, account, and
-  product-platform mapping records for Amazon and Rakuten.
+  product-platform mapping records for Amazon and Rakuten. It exposes the
+  latest completed `catalog_sync_runs` heartbeat so consumers can enforce
+  run-level freshness without reading the operational table directly.
 
 The role has `USAGE` on `public` and `SELECT` on this view only. It has no base
 table, function, sequence, schema-create, or write privileges. CatalogSync owns
@@ -222,6 +224,7 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 
 | Date | Change | Author | Migration |
 |------|--------|--------|-----------|
+| 2026-07-20 | Added the latest completed catalog run ID, status, total SKU count, and finish time to the SELECT-only marketplace projection. This is the authoritative freshness signal because unchanged SKUs intentionally retain older per-row timestamps. | RPagentOS | `20260720020000_catalogsync_projection_run_freshness.sql` |
 | 2026-07-20 | Added the dedicated CatalogSync Rakuten VPS Auth identity and mapped it to the existing SELECT-only marketplace projection reader role. | RPagentOS | `20260720010000_catalogsync_rakuten_vps_auth_identity.sql` |
 | 2026-07-17 | Extended custom access-token hook to map shops 1-3 identity UUIDs: `f2214383-6188-42ea-8d42-7dd31b97dc69` → `catalogsync_shop1_reader`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` → `catalogsync_shop2_reader`, `1fdd359b-239b-4531-a38b-bb779e56d116` → `catalogsync_shop3_reader`. Resolves CatalogSync issue #34 owner-side follow-up. *Corrected by `20260717120000` — these UUIDs were local-only and never valid in hosted.* | RPagentOS | `20260717110000_catalogsync_shop1_3_auth_identity.sql` |
 | 2026-07-17 | Forward correction: replaced local-only shops 1-3 Auth UUIDs with actual hosted identities. Preserved shop4 and marketplace mappings. Removed invalid `f2214383-6188-42ea-8d42-7dd31b97dc69`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1`, `1fdd359b-239b-4531-a38b-bb779e56d116`. Applied `865a076c-cd9f-4fba-9fd2-4ff0a155f2c7` → `catalogsync_shop1_reader`, `a531e2ee-be44-4c7f-87da-7c1d0f75494f` → `catalogsync_shop2_reader`, `31a4c8c5-f8dc-40a8-813c-e7939a4e16d3` → `catalogsync_shop3_reader`. | RPagentOS | `20260717120000_fix_local_auth_identities.sql` |
