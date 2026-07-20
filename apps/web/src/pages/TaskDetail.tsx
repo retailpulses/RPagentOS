@@ -425,7 +425,7 @@ export default function TaskDetail() {
               {uploading ? 'Uploading...' : 'Upload File'}
               <input
                 type="file"
-                accept="image/*,.csv,text/csv,application/pdf,text/plain"
+                accept="image/*,.csv,text/csv,application/pdf,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,.xls"
                 onChange={handleAttachmentChange}
                 disabled={uploading}
                 style={{ display: 'none' }}
