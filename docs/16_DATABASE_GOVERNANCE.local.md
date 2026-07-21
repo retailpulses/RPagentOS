@@ -21,6 +21,23 @@ Last updated: 2026-07-17
 ## Consumed Shared Domains
 
 - `ticketing` (owned by ticket-handling) — tickets (for task linking)
+- `inquiry_management` (owned by inquiry-automation) — temporary migration-time
+  dependency for retiring RPagentOS-owned `mercari_inquiries`; related to
+  `retailpulses/inquiry-automation#35`. No recurring RPagentOS workload reads or
+  writes this domain. The compatibility view is read-only and scheduled for
+  removal no earlier than 2026-10-31, after 30 consecutive days with zero
+  compatibility-view queries.
+
+## Legacy Mercari Inquiry Retirement
+
+RPagentOS owns the retirement of its historical `public.mercari_inquiries`
+table, but does not own the canonical inquiry-management schema. Migration
+`20260722010000_retire_legacy_mercari_inquiries.sql` is therefore sequenced
+after the inquiry-automation schema and high-risk historical consolidation.
+It fails closed unless every legacy row is represented by
+`inquiries.legacy_mercari_inquiries_id`, renames rather than drops the source
+table, and creates a worker-only read-only compatibility view. Applying this
+migration to hosted Supabase requires separate explicit approval.
 
 ## CatalogSync Mercari shop4 Read Boundary
 
