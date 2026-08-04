@@ -9,6 +9,8 @@
     "src/api/internal-catalog.test.ts",
     "src/api/internal-catalog-batch.test.ts",
     "src/api/internal-catalog-listing-state.test.ts",
+    "src/api/internal-catalog-source-imports.test.ts",
+    "src/api/internal-catalog-listing-candidates.test.ts",
     "functions/api/internal/catalog/**/*.ts"
   ]
 }
