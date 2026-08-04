@@ -2091,6 +2091,136 @@ export async function handleListingCandidatesQuery(
     skusByListingId.set(row.listing_id, entries);
   }
 
+  if (unambiguousVariants.length > 0) {
+    const variantByItemCodeIdentity = new Map<string, string>();
+    const canonicalCodes: string[] = [];
+    for (const v of unambiguousVariants) {
+      variantByItemCodeIdentity.set(identityKey(v.item_code), v.id);
+      canonicalCodes.push(v.item_code);
+    }
+
+    let legacySkuRows: unknown[];
+    try {
+      legacySkuRows = [];
+      for (const batch of chunks(canonicalCodes, 50)) {
+        // At most four linked plus four legacy rows per SKU can be relevant
+        // (one per Mercari shop in each set). Read one extra row and fail closed
+        // instead of silently truncating an ambiguous identity set.
+        const maxExpectedRows = batch.length * MERCARI_SHOPS.length * 2;
+        const orFilter = `(${batch.map((c) => {
+          const escaped = c.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '\\%').replace(/_/g, '\\_');
+          return `sku_code.ilike."${escaped}"`;
+        }).join(',')})`;
+        const batchRows = await supabaseRows(
+          supabaseEnv,
+          'platform_listing_skus',
+          {
+            select: 'listing_id,external_sku_id,sku_code,sku_status,raw_payload',
+            sku_position: 'eq.1',
+            or: orFilter,
+            limit: String(maxExpectedRows + 1),
+          },
+          fetchFn,
+        );
+        if (batchRows.length > maxExpectedRows) {
+          throw new Error('legacy SKU identity set exceeded safety ceiling');
+        }
+        legacySkuRows.push(...batchRows);
+      }
+    } catch (error) {
+      console.error('listing-candidates legacy SKU read failed', error);
+      return json({ error: 'catalog_upstream_error' }, 502);
+    }
+
+    const legacySkuByListingId = new Map<string, Array<{
+      external_sku_id: string | null;
+      sku_code: string | null;
+      sku_status: string | null;
+      raw_payload: Record<string, unknown> | null;
+    }>>();
+
+    for (const value of legacySkuRows) {
+      const row = value as Record<string, unknown>;
+      if (typeof row.listing_id !== 'string') continue;
+      const entries = legacySkuByListingId.get(row.listing_id) ?? [];
+      entries.push({
+        external_sku_id: typeof row.external_sku_id === 'string' ? row.external_sku_id : null,
+        sku_code: typeof row.sku_code === 'string' ? row.sku_code : null,
+        sku_status: typeof row.sku_status === 'string' ? row.sku_status : null,
+        raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
+          ? row.raw_payload as Record<string, unknown> : null,
+      });
+      legacySkuByListingId.set(row.listing_id, entries);
+    }
+
+    const linkedListingIds = new Set(listingIds);
+    const legacyListingIds = [...new Set(
+      [...legacySkuByListingId.keys()].filter((listingId) => !linkedListingIds.has(listingId)),
+    )];
+
+    if (legacyListingIds.length > 0) {
+      let legacyListingRows: unknown[];
+      try {
+        legacyListingRows = [];
+        for (const batch of chunks(legacyListingIds, 50)) {
+          legacyListingRows.push(...await supabaseRows(
+            supabaseEnv,
+            'platform_listings',
+            {
+              select: 'id,variant_id,external_listing_id,shop_code,listing_status,raw_payload',
+              id: postgrestIn(batch),
+              variant_id: 'is.null',
+              platform: 'eq.mercari',
+              shop_code: postgrestIn(MERCARI_SHOPS),
+              limit: String(batch.length + 1),
+            },
+            fetchFn,
+          ));
+        }
+      } catch (error) {
+        console.error('listing-candidates legacy listing read failed', error);
+        return json({ error: 'catalog_upstream_error' }, 502);
+      }
+
+      for (const value of legacyListingRows) {
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string' || typeof row.shop_code !== 'string') continue;
+        if (row.variant_id !== null) continue;
+
+        const listingId = row.id as string;
+        const shopCode = row.shop_code as string;
+
+        const legacySkus = legacySkuByListingId.get(listingId) ?? [];
+        const legacySku = legacySkus.length >= 1 ? legacySkus[0] : null;
+        if (!legacySku || !legacySku.sku_code) continue;
+
+        const skuIdentity = identityKey(legacySku.sku_code);
+        const mappedVariantId = variantByItemCodeIdentity.get(skuIdentity);
+        if (!mappedVariantId) continue;
+
+        let shopMap = listingsByVariantAndShop.get(mappedVariantId);
+        if (!shopMap) {
+          shopMap = new Map();
+          listingsByVariantAndShop.set(mappedVariantId, shopMap);
+        }
+
+        const shopEntries = shopMap.get(shopCode) ?? [];
+        shopEntries.push({
+          id: listingId,
+          external_listing_id: typeof row.external_listing_id === 'string' ? row.external_listing_id : null,
+          listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
+          raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
+            ? row.raw_payload as Record<string, unknown> : null,
+        });
+        shopMap.set(shopCode, shopEntries);
+
+        if (!skusByListingId.has(listingId)) {
+          skusByListingId.set(listingId, legacySkus);
+        }
+      }
+    }
+  }
+
   function extractTimestampFromState(rawPayload: Record<string, unknown> | null, field: string): string | null {
     if (!rawPayload) return null;
     const state = rawPayload.catalogsync_listing_state;

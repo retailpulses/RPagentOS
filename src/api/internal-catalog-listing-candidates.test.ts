@@ -45,6 +45,23 @@ function mockFetch(opts: {
   commercialReadFails?: boolean;
   listingReadFails?: boolean;
   skuReadFails?: boolean;
+  legacyListings?: Array<{
+    id: string;
+    variant_id: null;
+    external_listing_id: string;
+    shop_code: string;
+    listing_status: string;
+    raw_payload?: Record<string, unknown> | null;
+  }>;
+  legacySkus?: Array<{
+    listing_id: string;
+    external_sku_id?: string | null;
+    sku_code?: string | null;
+    sku_status?: string | null;
+    raw_payload?: Record<string, unknown> | null;
+  }>;
+  legacySkuReadFails?: boolean;
+  legacyListingReadFails?: boolean;
 } = {}): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
   return async (input) => {
     const url = String(input);
@@ -60,6 +77,14 @@ function mockFetch(opts: {
     }
 
     if (url.includes('/platform_listings?')) {
+      if (url.includes('variant_id=is.null')) {
+        if (opts.legacyListingReadFails) return new Response('unavailable', { status: 500 });
+        return Response.json((opts.legacyListings ?? []).map((l) => ({
+          ...l,
+          variant_id: null,
+          raw_payload: l.raw_payload ?? null,
+        })));
+      }
       if (opts.listingReadFails) return new Response('unavailable', { status: 500 });
       return Response.json((opts.listings ?? []).map((l) => ({
         ...l,
@@ -68,6 +93,10 @@ function mockFetch(opts: {
     }
 
     if (url.includes('/platform_listing_skus?')) {
+      if (url.includes('sku_code.ilike')) {
+        if (opts.legacySkuReadFails) return new Response('unavailable', { status: 500 });
+        return Response.json(opts.legacySkus ?? []);
+      }
       if (opts.skuReadFails) return new Response('unavailable', { status: 500 });
       return Response.json(opts.skus ?? []);
     }
@@ -454,4 +483,188 @@ test('mixes success and error results preserving order', async () => {
   assert.ok('variant_id' in body.results[0]);
   assert.equal(body.results[1].item_code, 'SKU-MISSING');
   assert.equal(body.results[1].error, 'sku_not_found');
+});
+
+test('returns legacy NULL-variant listing with shop mapping, IDs, and stored status', async () => {
+  const listingRawPayload = {
+    catalogsync_listing_state: {
+      queued_at: '2025-01-01T00:00:00.000Z',
+      opened_at: '2025-06-01T00:00:00.000Z',
+    },
+  };
+  const skuRawPayload = {
+    catalogsync_listing_state: {
+      queued_at: '2025-01-01T00:00:00.000Z',
+    },
+  };
+
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: 'ext-legacy-1', shop_code: 'shop1', listing_status: 'OPENED', raw_payload: listingRawPayload },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-legacy-1', sku_code: 'SKU-A', sku_status: 'OPENED', raw_payload: skuRawPayload },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.results.length, 1);
+  const r = body.results[0];
+
+  assert.equal(r.variant_id, 'v-1');
+  assert.ok(r.mercari_mappings.shop1, 'shop1 should have legacy mapping');
+  assert.equal(r.mercari_mappings.shop1.external_listing_id, 'ext-legacy-1');
+  assert.equal(r.mercari_mappings.shop1.external_sku_id, 'esk-legacy-1');
+  assert.equal(r.mercari_mappings.shop1.sku_code, 'SKU-A');
+  assert.equal(r.mercari_mappings.shop1.status, 'OPENED');
+  assert.equal(r.mercari_mappings.shop1.queued_at, '2025-01-01T00:00:00.000Z');
+  assert.equal(r.mercari_mappings.shop1.opened_at, '2025-06-01T00:00:00.000Z');
+
+  assert.equal(r.mercari_mappings.shop2, null);
+  assert.equal(r.mercari_mappings.shop3, null);
+  assert.equal(r.mercari_mappings.shop4, null);
+});
+
+test('fails closed when legacy SKU identity set exceeds its safety ceiling', async () => {
+  const legacySkus = Array.from({ length: 9 }, (_, index) => ({
+    listing_id: `l-legacy-${index}`,
+    external_sku_id: `esk-${index}`,
+    sku_code: 'SKU-A',
+    sku_status: 'OPENED',
+  }));
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacySkus,
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error, 'catalog_upstream_error');
+});
+
+test('duplicate legacy listings for one shop returns listing_mapping_conflict', async () => {
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: 'ext-legacy-1', shop_code: 'shop1', listing_status: 'OPENED' },
+      { id: 'l-legacy-2', variant_id: null, external_listing_id: 'ext-legacy-2', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-1', sku_code: 'SKU-A', sku_status: 'OPENED' },
+      { listing_id: 'l-legacy-2', external_sku_id: 'esk-2', sku_code: 'SKU-A', sku_status: 'OPENED' },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
+});
+
+test('collision between linked and legacy listing returns listing_mapping_conflict', async () => {
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    listings: [
+      { id: 'l-1', variant_id: 'v-1', external_listing_id: 'ext-1', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    skus: [
+      { listing_id: 'l-1', external_sku_id: 'esk-1', sku_code: 'SKU-A', sku_status: 'OPENED' },
+    ],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: 'ext-legacy-1', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-legacy-1', sku_code: 'SKU-A', sku_status: 'OPENED' },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
+});
+
+test('legacy listing with multiple SKU rows returns listing_mapping_conflict', async () => {
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: 'ext-legacy-1', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-1', sku_code: 'SKU-A', sku_status: 'OPENED' },
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-2', sku_code: 'SKU-B', sku_status: 'OPENED' },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
+});
+
+test('legacy listing with missing external_listing_id returns listing_mapping_conflict', async () => {
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: '', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: 'esk-legacy-1', sku_code: 'SKU-A', sku_status: 'OPENED' },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
+});
+
+test('legacy listing with missing SKU external_sku_id returns listing_mapping_conflict', async () => {
+  const fetchFn = mockFetch({
+    variants: [makeVariant('v-1', 'SKU-A')],
+    commercials: [makeCommercial('v-1')],
+    legacyListings: [
+      { id: 'l-legacy-1', variant_id: null, external_listing_id: 'ext-legacy-1', shop_code: 'shop1', listing_status: 'OPENED' },
+    ],
+    legacySkus: [
+      { listing_id: 'l-legacy-1', external_sku_id: null, sku_code: 'SKU-A', sku_status: 'OPENED' },
+    ],
+  });
+
+  const response = await handleListingCandidatesQuery(
+    request({ item_codes: ['SKU-A'] }),
+    env,
+    fetchFn,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
 });
