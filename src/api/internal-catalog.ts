@@ -593,6 +593,19 @@ const VALID_TRANSITIONS: Record<string, Set<string>> = {
   SUSPENDED: new Set(['SUSPENDED']),
 };
 
+const LEGACY_LISTING_STATUS_MAP: Record<string, string> = {
+  active: 'OPENED',
+  inactive: 'CLOSED',
+  draft: 'UNOPENED',
+};
+
+function normalizedStoredListingStatus(value: string | null): string {
+  if (!value) return '__missing__';
+  const upper = value.toUpperCase();
+  if (VALID_LISTING_STATUSES.has(upper)) return upper;
+  return LEGACY_LISTING_STATUS_MAP[value.toLowerCase()] ?? '__missing__';
+}
+
 const MAX_FIELD_LENGTHS: Record<string, number> = {
   platform: 64,
   shop_code: 64,
@@ -973,7 +986,7 @@ export async function handleListingStateBatch(
         }
       }
 
-      const currentStatus = existingListing.listing_status ?? '__missing__';
+      const currentStatus = normalizedStoredListingStatus(existingListing.listing_status);
       const allowed = VALID_TRANSITIONS[currentStatus] ?? new Set();
       if (!allowed.has(update.listing_status)) {
         results[update.index] = {
