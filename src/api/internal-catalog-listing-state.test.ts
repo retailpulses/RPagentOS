@@ -908,6 +908,25 @@ test('OPENED -> OPENED stays OPENED', async () => {
   assert.equal(body.results[0].result, 'updated');
 });
 
+test('legacy active status reconciles as OPENED', async () => {
+  const response = await handleListingStateBatch(
+    request({ updates: [validUpdate({ listing_status: 'OPENED', idempotency_key: 'legacy-reconcile' })] }),
+    env,
+    mockFullFetch({
+      variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+      listings: [{ id: 'listing-1', variant_id: 'v1', listing_status: 'active' }],
+      skus: [{
+        listing_id: 'listing-1',
+        external_sku_id: 'mercari-sku-1',
+        sku_code: 'N511P407695W',
+      }],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].result, 'updated');
+});
+
 test('rejects non-object item in updates array', async () => {
   const response = await handleListingStateBatch(
     request({ updates: ['not-an-object'] }),
