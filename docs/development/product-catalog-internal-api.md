@@ -105,10 +105,135 @@ freshness threshold before publishing inventory.
 Malformed bodies and duplicate request codes return `400`; more than 200 codes
 returns `413`. An owner-database failure returns `502` for the whole request.
 
+## Write marketplace listing states
+
+`POST /api/internal/catalog/listing-state`
+
+The bearer authentication is identical to the other internal catalog endpoints.
+
+Request:
+
+```json
+{
+  "updates": [{
+    "platform": "mercari",
+    "shop_code": "shop1",
+    "item_code": "GIGA-ITEM-CODE",
+    "external_listing_id": "mercari-product-id",
+    "external_sku_id": "mercari-variant-id",
+    "sku_code": "GIGA-ITEM-CODE",
+    "listing_status": "UNOPENED",
+    "observed_at": "2026-08-01T00:00:00.000Z",
+    "idempotency_key": "stable-caller-generated-key",
+    "metadata": {"score": 84}
+  }]
+}
+```
+
+### Constraints
+
+- 1-100 updates per request
+- All keys are validated; unknown keys are rejected
+- `platform`, `shop_code`, `item_code`, `external_listing_id`, `external_sku_id`,
+  `sku_code`, `listing_status`, `observed_at`, `idempotency_key` are required,
+  non-blank strings with maximum lengths
+- `observed_at` must be a valid ISO-8601 timestamp
+- `listing_status` must be one of `UNOPENED`, `OPENED`, `CLOSED`, `SUSPENDED`
+  (case-insensitive input, normalized uppercase storage)
+- `metadata` is optional, must be an object, and must not exceed 16 KiB when
+  serialized
+- Duplicate identities (`platform` + `shop_code` + `external_listing_id`) within
+  a single request are rejected
+
+### Variant resolution
+
+The endpoint resolves `product_variants.id` by case-insensitive exact match
+on `item_code` using batched PostgREST reads. Per-row errors:
+
+- `variant_not_found` — no canonical variant exists for `item_code`
+- `duplicate_item_code` — multiple variants share the same normalized identity
+
+These rows are rejected and the listing/tables are never touched.
+
+### Identity conflict detection
+
+Existing `platform_listings` and `platform_listing_skus` (position 1) are read
+for the bounded platform/shop/external-ID tuples. If an existing listing maps to
+a different `variant_id` or the existing SKU row maps to a different `sku_code`
+or `external_sku_id`, the update returns `identity_conflict` and the row is
+never overwritten.
+
+### Legal status transitions
+
+| Current state | Allowed next states |
+|---|---|
+| (missing) | `UNOPENED`, `OPENED`, `CLOSED`, `SUSPENDED` |
+| `UNOPENED` | `UNOPENED`, `OPENED`, `CLOSED`, `SUSPENDED` |
+| `OPENED` | `OPENED`, `CLOSED`, `SUSPENDED` |
+| `CLOSED` | `CLOSED` |
+| `SUSPENDED` | `SUSPENDED` |
+
+Illegal transitions return `illegal_status_transition`.
+
+### Upsert behavior
+
+Both `platform_listings` (on `platform, shop_code, external_listing_id`) and
+`platform_listing_skus` (on `listing_id, sku_position=1`) use PostgREST with
+`Prefer: resolution=merge-duplicates,return=representation`.
+
+The following fields are written to `platform_listings`:
+- `platform`, `shop_code`, `external_listing_id`, `variant_id`, `listing_status`
+- `platform_updated_at` set to `observed_at`
+- `raw_payload` merged preserving all unrelated keys with a new
+  `catalogsync_listing_state` object containing `observed_at`, `idempotency_key`,
+  caller metadata, plus:
+  - `queued_at` — set on first `UNOPENED` and preserved thereafter
+  - `opened_at` — set on first `OPENED` and preserved thereafter
+
+The following fields are written to `platform_listing_skus`:
+- `listing_id`, `sku_position=1`, `variant_id`, `external_sku_id`, `sku_code`,
+  `seller_sku`
+- `raw_payload` merged similarly
+
+### Idempotency
+
+A retry with an identical `idempotency_key` to the stored value returns
+`unchanged` without additional writes.
+
+### Response
+
+HTTP `200` with results in input order:
+
+```json
+{
+  "results": [
+    {"platform": "mercari", "shop_code": "shop1", "external_listing_id": "mercari-prod-1", "result": "created"},
+    {"platform": "mercari", "shop_code": "shop1", "external_listing_id": "mercari-prod-2", "error": "variant_not_found"},
+    {"platform": "mercari", "shop_code": "shop1", "external_listing_id": "mercari-prod-3", "result": "unchanged"}
+  ]
+}
+```
+
+Each result is either `created`, `updated`, `unchanged`, or one of the per-row
+errors: `variant_not_found`, `duplicate_item_code`, `identity_conflict`,
+`illegal_status_transition`.
+
+### Error responses
+
+- `400` — validation failures (malformed body, invalid/oversized fields,
+  unknown keys, duplicate identities, invalid count)
+- `401 unauthorized` — missing or invalid bearer authentication
+- `405 method_not_allowed` — non-POST request
+- `502 catalog_upstream_error` — any upstream/PostgREST failure (fail closed,
+  no partial success)
+- `503 service_not_configured` — required server secrets absent
+
 ## Verification
 
 Run `npm run test:internal-api`, `npm run typecheck:internal-api`, and
 `npm run typecheck:all`. The focused tests
 cover authorization, malformed/duplicate/oversize batches, missing SKUs, exact
 zero preservation, absent or not-ready commercial state, duplicate identity,
-unknown quantities, upstream errors, and method handling.
+unknown quantities, upstream errors, method handling, listing-state validation,
+status transitions, conflict detection, idempotent retry, raw payload
+preservation, and both table writes.
