@@ -777,19 +777,19 @@ export async function handlePublishClaim(
     return json({
       listing_id: listingId, claim_id: '', content_revision: currentRevision,
       stage_before: currentStage as LifecycleStage, outcome: 'not_eligible',
-    } satisfies PublishClaimResult);
+    } satisfies PublishClaimResult, 409);
   }
   if (currentRevision !== expectedRevision || scoredRevision !== expectedRevision) {
     return json({
       listing_id: listingId, claim_id: '', content_revision: currentRevision,
       stage_before: currentStage as LifecycleStage, outcome: 'stale',
-    } satisfies PublishClaimResult);
+    } satisfies PublishClaimResult, 409);
   }
   if (currentScore === null || currentScore < 75) {
     return json({
       listing_id: listingId, claim_id: '', content_revision: currentRevision,
       stage_before: currentStage as LifecycleStage, outcome: 'not_eligible',
-    } satisfies PublishClaimResult);
+    } satisfies PublishClaimResult, 409);
   }
 
   const claimId = crypto.randomUUID();
@@ -1110,7 +1110,7 @@ export async function handleRestoreListing(
   }
 
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
       lifecycle_stage: 'draft',
       content_revision: (typeof listing.content_revision === 'number' ? listing.content_revision : 1) + 1,
       retired_at: null,
@@ -1122,6 +1122,12 @@ export async function handleRestoreListing(
       publish_claim_id: null,
       publish_claimed_at: null,
     }, fetchFn, undefined, ['lifecycle_stage=eq.retired']);
+    if (!patched) {
+      return json({
+        listing_id: listingId, lifecycle_stage: 'retired' as LifecycleStage,
+        outcome: 'stale',
+      } satisfies ListingLifecycleResult, 409);
+    }
   } catch (error) {
     console.error('restore patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -1206,7 +1212,8 @@ export async function handleListingObservationsBatch(
       // Only recover when a publish claim is active — prevents bypassing the claim guard.
       const storedClaimId = typeof listing.publish_claim_id === 'string'
         ? listing.publish_claim_id : null;
-      if (listing.lifecycle_stage === 'publish_pending' && externalId && storedClaimId) {
+      const isRecovery = listing.lifecycle_stage === 'publish_pending' && externalId && storedClaimId;
+      if (isRecovery) {
         const existingExtId = typeof listing.external_listing_id === 'string'
           ? listing.external_listing_id : null;
         if (!existingExtId || existingExtId === externalId) {
@@ -1217,7 +1224,17 @@ export async function handleListingObservationsBatch(
         }
       }
 
-      await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn);
+      // Atomic predicates: for recovery, guard against concurrent release/transition.
+      const obsFilters: string[] | undefined = isRecovery
+        ? [`publish_claim_id=eq.${storedClaimId}`, 'lifecycle_stage=eq.publish_pending']
+        : undefined;
+
+      const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn, undefined, obsFilters);
+      if (!patched && isRecovery) {
+        // Another transition won the race — report as conflict, not observed.
+        results.results.push({ listing_id: listingId, outcome: 'not_found', content_drift: false });
+        continue;
+      }
       results.results.push({ listing_id: listingId, outcome: 'observed', content_drift: Boolean(drift) });
     } catch (error) {
       console.error('observation patch failed', error);
