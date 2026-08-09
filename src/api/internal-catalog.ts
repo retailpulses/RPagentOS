@@ -318,7 +318,7 @@ export interface RetireListingRequest {
 export interface ListingLifecycleResult {
   listing_id: string;
   lifecycle_stage: LifecycleStage;
-  outcome: 'transitioned' | 'stale' | 'not_found';
+  outcome: 'transitioned' | 'stale' | 'not_found' | 'not_published';
 }
 
 export interface ListingObservationEntry {

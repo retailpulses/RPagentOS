@@ -149,11 +149,18 @@ async function postgrestPatch(
   body: Record<string, unknown>,
   fetchFn: typeof fetch,
   expectedRevision?: number,
+  extraFilters?: string[],
 ): Promise<Record<string, unknown> | null> {
   let filter = `${idColumn}=eq.${encodeURIComponent(idValue)}`;
   // Atomic revision guard: only patch if content_revision hasn't changed.
   if (expectedRevision !== undefined) {
     filter += `&content_revision=eq.${expectedRevision}`;
+  }
+  // Additional PostgREST filter clauses for atomic stage/claim predicates.
+  if (extraFilters) {
+    for (const f of extraFilters) {
+      filter += `&${f}`;
+    }
   }
   const url = new URL(`/rest/v1/${table}?${filter}`, env.SUPABASE_URL.replace(/\/$/, ''));
   const response = await fetchFn(url, {
@@ -792,12 +799,15 @@ export async function handlePublishClaim(
       publish_claim_id: claimId,
       publish_idempotency_key: idempotencyKey,
       publish_claimed_at: new Date().toISOString(),
-    }, fetchFn, expectedRevision);
+    }, fetchFn, expectedRevision, [
+      'lifecycle_stage=in.(draft,enhanced)',
+      'publish_claim_id=is.null',
+    ]);
     if (!patched) {
       return json({
         listing_id: listingId, claim_id: '', content_revision: currentRevision,
         stage_before: currentStage as LifecycleStage, outcome: 'stale',
-      } satisfies PublishClaimResult);
+      } satisfies PublishClaimResult, 409);
     }
   } catch (error) {
     console.error('publish-claim patch failed', error);
@@ -887,7 +897,7 @@ export async function handlePublishFinalization(
   const now = new Date().toISOString();
 
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
       lifecycle_stage: 'published',
       listing_status: listingStatus,
       external_listing_id: extListingId,
@@ -901,7 +911,16 @@ export async function handlePublishFinalization(
       observed_at: observedAt,
       content_drift: false,
       platform_updated_at: observedAt,
-    }, fetchFn);
+      publish_idempotency_key: null,
+    }, fetchFn, undefined, [
+      `publish_claim_id=eq.${claimId}`,
+      'lifecycle_stage=eq.publish_pending',
+    ]);
+    if (!patched) {
+      return json({
+        listing_id: listingId, outcome: 'claim_not_found',
+      } satisfies PublishFinalizationResult, 409);
+    }
   } catch (error) {
     console.error('publish-finalize patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -965,11 +984,20 @@ export async function handlePublishRelease(
   }
 
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
       lifecycle_stage: 'enhanced',
       publish_claim_id: null,
       publish_claimed_at: null,
-    }, fetchFn);
+      publish_idempotency_key: null,
+    }, fetchFn, undefined, [
+      `publish_claim_id=eq.${claimId}`,
+      'lifecycle_stage=eq.publish_pending',
+    ]);
+    if (!patched) {
+      return json({
+        listing_id: listingId, outcome: 'claim_not_found',
+      } satisfies PublishReleaseResult, 409);
+    }
   } catch (error) {
     console.error('publish-release patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -1006,6 +1034,10 @@ export async function handleRetireListing(
   }
   const req = body as Record<string, unknown>;
   const reason = requireNonEmptyString(req.reason, 'reason', 500);
+  const expectedRevision = req.expected_content_revision;
+  if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
+    return json({ error: 'invalid_expected_revision' }, 400);
+  }
 
   const supabaseEnv = {
     SUPABASE_URL: env.SUPABASE_URL!,
@@ -1021,12 +1053,25 @@ export async function handleRetireListing(
     } satisfies ListingLifecycleResult);
   }
 
+  if (listing.lifecycle_stage !== 'published') {
+    return json({
+      listing_id: listingId, lifecycle_stage: listing.lifecycle_stage as LifecycleStage,
+      outcome: 'not_published',
+    } satisfies ListingLifecycleResult, 409);
+  }
+
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
       lifecycle_stage: 'retired',
       retired_at: new Date().toISOString(),
       retirement_reason: reason,
-    }, fetchFn);
+    }, fetchFn, expectedRevision, ['lifecycle_stage=eq.published']);
+    if (!patched) {
+      return json({
+        listing_id: listingId, lifecycle_stage: listing.lifecycle_stage as LifecycleStage,
+        outcome: 'stale',
+      } satisfies ListingLifecycleResult, 409);
+    }
   } catch (error) {
     console.error('retire patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -1077,7 +1122,7 @@ export async function handleRestoreListing(
       scored_at: null,
       publish_claim_id: null,
       publish_claimed_at: null,
-    }, fetchFn);
+    }, fetchFn, undefined, ['lifecycle_stage=eq.retired']);
   } catch (error) {
     console.error('restore patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -1158,14 +1203,18 @@ export async function handleListingObservationsBatch(
       if (externalId) patch.external_listing_id = externalId;
       if (oStatus) patch.listing_status = oStatus;
 
-      // If publish_pending with matching external identity, recover to published
-      if (listing.lifecycle_stage === 'publish_pending' && externalId) {
+      // If publish_pending with matching external identity, recover to published.
+      // Only recover when a publish claim is active — prevents bypassing the claim guard.
+      const storedClaimId = typeof listing.publish_claim_id === 'string'
+        ? listing.publish_claim_id : null;
+      if (listing.lifecycle_stage === 'publish_pending' && externalId && storedClaimId) {
         const existingExtId = typeof listing.external_listing_id === 'string'
           ? listing.external_listing_id : null;
         if (!existingExtId || existingExtId === externalId) {
           patch.lifecycle_stage = 'published';
           patch.published_content_revision = listing.content_revision;
           patch.published_at = typeof listing.published_at === 'string' ? listing.published_at : oAt;
+          patch.publish_idempotency_key = null;
         }
       }
 
