@@ -29,6 +29,7 @@ jobs:
       LISTING_ID: ${{ inputs.listing_id }}
       SHOP_CODE: ${{ inputs.shop_code }}
       LISTING_QWEN_MODEL: qwen3.5:9b
+      LISTING_QWEN_TIMEOUT_MS: "600000"
       COPY_APPLY_MODE: dry_run
       COPY_IMPROVEMENT_ENABLED: "false"
 

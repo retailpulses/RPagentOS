@@ -181,10 +181,18 @@ export function proposalInputIdentity(
   };
 }
 
-export async function callOllama(prompt: string, model: string, ollamaUrl: string, timeoutMs = 240000): Promise<{ content: string; error?: string }> {
+export async function callOllama(
+  prompt: string,
+  model: string,
+  ollamaUrl: string,
+  timeoutMs = Number(process.env['LISTING_QWEN_TIMEOUT_MS'] ?? '240000'),
+): Promise<{ content: string; error?: string }> {
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1000
+    ? Math.min(timeoutMs, 900000)
+    : 240000;
   const url = `${ollamaUrl.replace(/\/$/, '')}/api/chat`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   try {
     const response = await fetch(url, {
       method: 'POST',
