@@ -901,7 +901,6 @@ export async function handlePublishFinalization(
       lifecycle_stage: 'published',
       listing_status: listingStatus,
       external_listing_id: extListingId,
-      external_sku_id: extSkuId,
       sku_code: skuCode,
       published_content_revision: publishedRevision,
       published_at: typeof listing.published_at === 'string' ? listing.published_at : now,
