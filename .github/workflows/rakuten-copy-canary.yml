@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       listing_id:
-        description: "Optional Rakuten platform_listings UUID; blank selects one eligible weak listing"
+        description: "Optional Rakuten platform_listings UUID; blank selects the newest draft/enhanced Rakuten listing"
         required: false
         default: ""
       shop_code:
@@ -96,7 +96,18 @@ jobs:
       - name: Run one-listing Rakuten proposal canary
         shell: bash
         run: |
-          args=(--mode=dry_run --platform=rakuten --limit=1)
-          if [[ -n "$LISTING_ID" ]]; then args+=("--listing-id=$LISTING_ID"); fi
+          selected_listing_id="$LISTING_ID"
+          if [[ -z "$selected_listing_id" ]]; then
+            selected_listing_id="$(curl -fsS --get "$SUPABASE_URL/rest/v1/platform_listings" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              --data-urlencode "select=id" \
+              --data-urlencode "platform=eq.rakuten" \
+              --data-urlencode "lifecycle_stage=in.(draft,enhanced)" \
+              --data-urlencode "order=updated_at.desc" \
+              --data-urlencode "limit=1" | jq -r '.[0].id // empty')"
+          fi
+          test -n "$selected_listing_id"
+          args=(--mode=dry_run --platform=rakuten --limit=1 "--listing-id=$selected_listing_id")
           if [[ -n "$SHOP_CODE" ]]; then args+=("--shop-code=$SHOP_CODE"); fi
           npx tsx src/jobs/improve-listing-copy.ts "${args[@]}"
