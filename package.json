@@ -39,6 +39,9 @@
     "job:quality:technical-review": "tsx --env-file=.env.cloud.local src/jobs/run-technical-review.ts",
     "job:quality:seed-policies": "tsx --env-file=.env.cloud.local src/jobs/seed-review-policies.ts",
     "job:quality:apply-qwen": "tsx --env-file=.env.cloud.local src/jobs/apply-qwen-findings.ts",
+    "job:listing:improve-copy": "tsx --env-file=.env.local src/jobs/improve-listing-copy.ts",
+    "job:listing:improve-copy:cloud": "tsx --env-file=.env.cloud.local src/jobs/improve-listing-copy.ts",
+    "test:copy": "tsx --test src/packages/listing-copy/improve-copy.test.ts",
     "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],
