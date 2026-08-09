@@ -2197,7 +2197,7 @@ export async function handleListingCandidatesQuery(
     'published_content_revision', 'published_at',
   ];
   const LEGACY_SELECT = [
-    'id', 'variant_id', 'external_listing_id', 'external_sku_id',
+    'id', 'variant_id', 'external_listing_id',
     'shop_code', 'listing_status', 'raw_payload',
   ];
   const V2_SELECT = [...LEGACY_SELECT, ...LIFECYCLE_COLUMNS];
