@@ -562,7 +562,7 @@ npm run job:listing:improve-copy -- \
 
 Release evidence:
 
-- 46 focused listing-copy tests pass.
+- 48 focused listing-copy tests pass.
 - 144 internal catalog API tests pass.
 - Root and web TypeScript checks pass.
 - Production web build passes.
@@ -597,8 +597,26 @@ manual bulk selection and per-listing validation evidence:
 - Audit writes: 30 new immutable run/result/review rows
 - Canonical listing writes: 0; automatic application remained disabled
 
-The two accepted proposals were directionally useful, but their reported
+The two accepted Qwen proposals were directionally useful, but their reported
 confidence values of 0.95 and 1.0 are not calibrated enough for automatic
-application. The next quick-win iteration is to fix strict JSON response
-handling and capture raw invalid output safely, then repeat a local 10-listing
-dry run. Do not enable `auto` from the current 20% repaired-valid result.
+application.
+
+The same deterministic 10 listings were then processed through the direct
+DeepSeek API using `deepseek-chat` and the same prompt, repair pass, validators,
+and dry-run persistence:
+
+- Runtime: 40.435 seconds, about 27.9 times faster than local Qwen 9B
+- Requests: 52; rows read: 550
+- Results: 5 first-pass valid, 5 invalid, 0 runtime failures
+- Structural reliability: 10/10 valid JSON responses; no JSON repair failures
+- Rejections: all 5 correctly declined to make a material change after repair
+- Groundedness: zero unsourced numeric facts and zero prohibited claims detected
+- Audit writes: 30 new immutable run/result/review rows
+- Canonical listing writes: 0; automatic application remained disabled
+
+DeepSeek is the stronger candidate for the quick learning loop: it produced
+usable structured output on every listing and five grounded improvements on the
+first pass. The remaining quick wins are to record token usage and API cost,
+calibrate confidence, and select genuinely weak listings instead of merely the
+newest listings. Do not enable `auto` until those checks and an operator review
+of accepted copy are complete.
