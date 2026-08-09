@@ -627,7 +627,11 @@ test('legacy listing with multiple SKU rows returns listing_mapping_conflict', a
   assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
 });
 
-test('legacy listing with missing external_listing_id returns listing_mapping_conflict', async () => {
+test('legacy listing with empty external_listing_id returns candidate successfully', async () => {
+  // Empty external_listing_id is a valid state — listings that haven't been
+  // finalized yet (or were created before external IDs were assigned) may
+  // have an empty external_listing_id.  The handler returns the candidate
+  // data so the pipeline can populate the external ID via finalize_publish.
   const fetchFn = mockFetch({
     variants: [makeVariant('v-1', 'SKU-A')],
     commercials: [makeCommercial('v-1')],
@@ -645,7 +649,9 @@ test('legacy listing with missing external_listing_id returns listing_mapping_co
     fetchFn,
   );
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).results[0].error, 'listing_mapping_conflict');
+  const result = (await response.json()).results[0];
+  assert.equal(result.error, undefined);
+  assert.equal(result.item_code, 'SKU-A');
 });
 
 test('legacy listing with missing SKU external_sku_id returns listing_mapping_conflict', async () => {
