@@ -1,0 +1,102 @@
+name: Rakuten Copy Improvement Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      listing_id:
+        description: "Optional Rakuten platform_listings UUID; blank selects one eligible weak listing"
+        required: false
+        default: ""
+      shop_code:
+        description: "Optional exact Rakuten shop code"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rakuten-copy-improvement-manual-canary
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: One-listing production dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      LISTING_ID: ${{ inputs.listing_id }}
+      SHOP_CODE: ${{ inputs.shop_code }}
+      LISTING_QWEN_MODEL: qwen3.5:9b
+      COPY_APPLY_MODE: dry_run
+      COPY_IMPROVEMENT_ENABLED: "false"
+
+    steps:
+      - name: Checkout released source
+        uses: actions/checkout@v4
+
+      - name: Validate bounded inputs
+        shell: bash
+        run: |
+          test -n "$SUPABASE_PROJECT_REF"
+          if [[ -n "$LISTING_ID" ]] && ! [[ "$LISTING_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+            echo "listing_id must be a UUID"
+            exit 1
+          fi
+          if [[ -n "$SHOP_CODE" ]] && ! [[ "$SHOP_CODE" =~ ^[A-Za-z0-9_-]{1,80}$ ]]; then
+            echo "shop_code contains unsupported characters"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Start local Ollama and pull Qwen
+        shell: bash
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 &
+          for attempt in {1..20}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull "$LISTING_QWEN_MODEL"
+
+      - name: Resolve ephemeral server-side database access
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          api_keys="$(supabase projects api-keys \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --reveal \
+            --output json)"
+          service_role_key="$(jq -r '[.[] | select(.name == "service_role")][0].api_key // empty' <<<"$api_keys")"
+          test -n "$service_role_key"
+          echo "::add-mask::$service_role_key"
+          echo "SUPABASE_URL=https://${SUPABASE_PROJECT_REF}.supabase.co" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$service_role_key" >> "$GITHUB_ENV"
+
+      - name: Run one-listing Rakuten proposal canary
+        shell: bash
+        run: |
+          args=(--mode=dry_run --platform=rakuten --limit=1)
+          if [[ -n "$LISTING_ID" ]]; then args+=("--listing-id=$LISTING_ID"); fi
+          if [[ -n "$SHOP_CODE" ]]; then args+=("--shop-code=$SHOP_CODE"); fi
+          npx tsx src/jobs/improve-listing-copy.ts "${args[@]}"
