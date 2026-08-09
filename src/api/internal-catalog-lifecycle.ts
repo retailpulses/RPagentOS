@@ -226,7 +226,7 @@ export async function handleDraftMaterialization(
 
   const sourceContentHash = requireNonEmptyString(req.source_content_hash, 'source_content_hash', 256);
   const initialTitle = requireNonEmptyString(req.initial_title || '', 'initial_title', 2000);
-  const initialDescription = requireNonEmptyString(req.initial_description || '', 'initial_description', 5000);
+  const initialDescription = typeof req.initial_description === 'string' ? req.initial_description.trim() : '';
   const initialCategoryId = typeof req.initial_category_id === 'string' ? req.initial_category_id.trim() : '';
   const initialImages: string[] = Array.isArray(req.initial_images)
     ? req.initial_images.filter((i): i is string => typeof i === 'string').slice(0, 20)
