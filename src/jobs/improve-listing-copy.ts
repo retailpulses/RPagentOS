@@ -12,6 +12,7 @@ import {
 import {
   applyContentUpdate,
   buildConfig,
+  callDeepSeek,
   callOllama,
   generateProposal,
   idempotencyKey,
@@ -288,6 +289,7 @@ async function ensureWorkItem(
 }
 
 async function persistProposal(result: CopyProposalResult, listing: ListingRow): Promise<void> {
+  const llmRuntime = process.env['LISTING_COPY_PROVIDER'] ?? 'ollama';
   const runStatus = result.validationStatus === 'failed' ? 'failed' : 'completed';
   const { data: run, error: runError } = await supabase.from('listing_intelligence_runs').insert({
     run_type: 'qwen_review',
@@ -298,7 +300,7 @@ async function persistProposal(result: CopyProposalResult, listing: ListingRow):
     source_snapshot_hash: result.inputHash,
     source_snapshot_version: listing.content_revision,
     metadata: {
-      kind: 'listing_copy', llm_runtime: 'ollama', llm_model: result.llmModel,
+      kind: 'listing_copy', llm_runtime: llmRuntime, llm_model: result.llmModel,
       prompt_profile: result.promptProfile, prompt_version: result.promptVersion, mode: result.mode,
     },
     error_message: result.errorMessage ?? null,
@@ -471,11 +473,23 @@ async function applyApproved(
 }
 
 async function main(): Promise<void> {
+  const provider = process.env['LISTING_COPY_PROVIDER'] ?? 'ollama';
+  if (provider !== 'ollama' && provider !== 'deepseek') {
+    throw new Error('LISTING_COPY_PROVIDER must be ollama or deepseek');
+  }
   const mode = (argValue('mode') ?? process.env['COPY_APPLY_MODE'] ?? 'dry_run') as CopyMode;
   if (!['dry_run', 'approval', 'auto'].includes(mode)) throw new Error('mode must be dry_run, approval, or auto');
   const limit = parseLimit(argValue('limit'));
   const applyingApproved = hasFlag('apply-approved');
   const config = buildConfig();
+  if (provider === 'deepseek' && !process.env['DEEPSEEK_API_KEY']) {
+    throw new Error('DEEPSEEK_API_KEY is required for the deepseek provider');
+  }
+  const modelCall = provider === 'deepseek'
+    ? (prompt: string, model: string) => callDeepSeek(
+      prompt, model, process.env['DEEPSEEK_API_KEY'] ?? '',
+    )
+    : (prompt: string, model: string) => callOllama(prompt, model, config.ollamaUrl);
   const configError = validateConfigForMode(config, applyingApproved ? 'approval' : mode);
   if (configError) throw new Error(configError);
   if (mode === 'auto' || applyingApproved) requireApplyEnvironment();
@@ -506,8 +520,7 @@ async function main(): Promise<void> {
 
       for (const listing of selection.listings) {
         const reusable = reusableProposals.get(listing.id);
-        const generated = reusable?.generated ?? await generateProposal(listing, config, (prompt, model) =>
-          callOllama(prompt, model, config.ollamaUrl));
+        const generated = reusable?.generated ?? await generateProposal(listing, config, modelCall);
         if (!reusable) summary.requestCount++;
         if (generated.proposal) summary.proposed++;
         if (generated.validationStatus === 'valid' || generated.validationStatus === 'repaired') summary.valid++;

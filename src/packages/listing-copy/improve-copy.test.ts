@@ -8,6 +8,7 @@ import {
   validateProposal,
   parseProposalFromLLM,
   generateProposal,
+  callDeepSeek,
   applyContentUpdate,
   idempotencyKey,
   type OllamaCallFn,
@@ -495,4 +496,32 @@ test('generateProposal accepts all-null proposal as no material change', async (
   }));
   assert.equal(result.validationStatus, 'invalid');
   assert.ok(result.validationErrors.some((e) => e.includes('no material change')));
+});
+
+test('callDeepSeek requests JSON output and returns assistant content', async () => {
+  const mockFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    assert.equal(String(input), 'https://api.deepseek.test/chat/completions');
+    assert.equal(init?.method, 'POST');
+    assert.equal((init?.headers as Record<string, string>).authorization, 'Bearer test-key');
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.model, 'deepseek-chat');
+    assert.deepEqual(body.response_format, { type: 'json_object' });
+    return Response.json({ choices: [{ message: { content: '{"title":"ok"}' } }] });
+  };
+  const result = await callDeepSeek(
+    'prompt', 'deepseek-chat', 'test-key', 'https://api.deepseek.test', 5000,
+    mockFetch as typeof fetch,
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.content, '{"title":"ok"}');
+});
+
+test('callDeepSeek reports provider errors without exposing the key', async () => {
+  const mockFetch = async (): Promise<Response> => new Response('rate limited', { status: 429 });
+  const result = await callDeepSeek(
+    'prompt', 'deepseek-chat', 'secret-key', 'https://api.deepseek.test', 5000,
+    mockFetch as typeof fetch,
+  );
+  assert.equal(result.error, 'DeepSeek 429: rate limited');
+  assert.equal(result.error?.includes('secret-key'), false);
 });

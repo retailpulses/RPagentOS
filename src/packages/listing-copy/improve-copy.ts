@@ -15,7 +15,7 @@ import {
 import { buildCopyImprovementPrompt, PROMPT_PROFILE, PROMPT_VERSION } from './copy-prompts.js';
 
 const DEFAULT_OLLAMA_URL = process.env['OLLAMA_BASE_URL'] ?? 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = process.env['LISTING_QWEN_MODEL'] ?? 'qwen3.5:9b';
+const DEFAULT_MODEL = process.env['LISTING_COPY_MODEL'] ?? process.env['LISTING_QWEN_MODEL'] ?? 'qwen3.5:9b';
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -211,6 +211,53 @@ export async function callOllama(
     const body = await response.json() as { message?: { content?: string }; response?: string; error?: string };
     if (body.error) return { content: '', error: `Ollama error: ${body.error}` };
     return { content: body.message?.content ?? body.response ?? '' };
+  } catch (err) {
+    return { content: '', error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function callDeepSeek(
+  prompt: string,
+  model: string,
+  apiKey: string,
+  baseUrl = process.env['DEEPSEEK_BASE_URL'] ?? 'https://api.deepseek.com',
+  timeoutMs = Number(process.env['LISTING_DEEPSEEK_TIMEOUT_MS'] ?? '120000'),
+  fetchFn: typeof fetch = fetch,
+): Promise<{ content: string; error?: string }> {
+  if (!apiKey) return { content: '', error: 'DEEPSEEK_API_KEY is required' };
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1000
+    ? Math.min(timeoutMs, 300000)
+    : 120000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
+  try {
+    const response = await fetchFn(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+        max_tokens: 900,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return { content: '', error: `DeepSeek ${response.status}: ${(await response.text()).slice(0, 500)}` };
+    }
+    const body = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (body.error?.message) return { content: '', error: `DeepSeek error: ${body.error.message}` };
+    return { content: body.choices?.[0]?.message?.content ?? '' };
   } catch (err) {
     return { content: '', error: err instanceof Error ? err.message : String(err) };
   } finally {
