@@ -53,6 +53,7 @@ interface SelectionResult {
 async function fetchRakutenListings(options: {
   shopCode?: string;
   listingId?: string;
+  manualSelection?: boolean;
   limit: number;
 }): Promise<SelectionResult> {
   let requests = 0;
@@ -86,7 +87,7 @@ async function fetchRakutenListings(options: {
       is_hero: false,
       trusted_facts: {},
     }))
-    .filter((listing) => Boolean(options.listingId) || isWeakCopy(listing))
+    .filter((listing) => Boolean(options.listingId) || options.manualSelection || isWeakCopy(listing))
     .slice(0, options.limit);
 
   if (selected.length === 0) return { listings: [], requests, rowsRead };
@@ -492,7 +493,8 @@ async function main(): Promise<void> {
       });
     } else {
       const selection = await fetchRakutenListings({
-        shopCode: argValue('shop-code'), listingId: argValue('listing-id'), limit,
+        shopCode: argValue('shop-code'), listingId: argValue('listing-id'),
+        manualSelection: hasFlag('manual-selection'), limit,
       });
       summary.selected = selection.listings.length;
       summary.requestCount += selection.requests;
@@ -511,6 +513,15 @@ async function main(): Promise<void> {
         if (generated.validationStatus === 'valid' || generated.validationStatus === 'repaired') summary.valid++;
         else if (generated.validationStatus === 'invalid') summary.invalid++;
         else summary.failed++;
+
+        console.log(JSON.stringify({
+          event: 'copy_proposal_result',
+          listingId: listing.id,
+          validationStatus: generated.validationStatus,
+          validationErrors: generated.validationErrors,
+          repairAttempts: generated.repairAttempts,
+          reused: Boolean(reusable),
+        }));
 
         const proposalResult: CopyProposalResult = {
           listingId: listing.id, workItemId: workItems.get(listing.id)?.id ?? '',
