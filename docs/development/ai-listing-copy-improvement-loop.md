@@ -577,16 +577,28 @@ Release evidence:
 The code and protected apply API are live. Automatic execution and recurring
 scheduling remain disabled.
 
-The first hosted one-listing canary completed in GitHub Actions run
-`31312834322` on 2026-08-09 using local `qwen3.5:4b` inference on the ephemeral
-runner. It selected one production Rakuten listing, made 13 database/model
-requests, read 73 rows, and wrote three new review/audit rows. The candidate
-remained invalid after one repair attempt, so no work item was routed for
-approval and no canonical listing content was changed. This-run result:
-`selected=1`, `valid=0`, `invalid=1`, `failed=0`, `autoApplied=0`, runtime
-391.230 seconds, zero unchanged writes, zero statement timeouts, and zero
-canonical business rows changed. The apply kill switch remained active.
+GitHub Actions run `31312834322` exercised the hosted credential and database
+path, but its CPU-only `qwen3.5:4b` result is infrastructure evidence only. It
+must not be used to judge the intended local-Qwen product loop.
 
-The next production step is to review the recorded validation failure and
-improve the proposal contract or prompt before another bounded dry run. Do not
-advance this candidate to `approval` or `auto`.
+The first production-data canary on the intended local M1 Pro runtime used
+`qwen3.5:9b`. One listing completed in 87.735 seconds versus 391.230 seconds for
+the hosted 4B listing step. It was rejected because the response remained
+non-JSON after one repair attempt. No canonical content changed.
+
+A subsequent local 10-listing learning batch ran from commit `4565a75` with
+manual bulk selection and per-listing validation evidence:
+
+- Runtime: 1,126.163 seconds (18 minutes 46 seconds)
+- Requests: 52; rows read: 550
+- Results: 2 repaired-valid, 8 invalid, 0 runtime failures
+- First-pass valid: 0; every accepted proposal required the repair pass
+- Rejections: 7 non-JSON responses and 1 unsourced numeric fact (`115cm`)
+- Audit writes: 30 new immutable run/result/review rows
+- Canonical listing writes: 0; automatic application remained disabled
+
+The two accepted proposals were directionally useful, but their reported
+confidence values of 0.95 and 1.0 are not calibrated enough for automatic
+application. The next quick-win iteration is to fix strict JSON response
+handling and capture raw invalid output safely, then repeat a local 10-listing
+dry run. Do not enable `auto` from the current 20% repaired-valid result.
