@@ -804,6 +804,7 @@ export async function handlePublishClaim(
       'lifecycle_stage=in.(draft,enhanced)',
       'publish_claim_id=is.null',
       `scored_content_revision=eq.${expectedRevision}`,
+      'score_total=gte.75',
     ]);
     if (!patched) {
       return json({
@@ -875,19 +876,22 @@ export async function handlePublishFinalization(
   const currentStage = (listing.lifecycle_stage as string) || 'draft';
   const currentClaimId = typeof listing.publish_claim_id === 'string' ? listing.publish_claim_id : null;
 
+  const currentExtId = typeof listing.external_listing_id === 'string' ? listing.external_listing_id : null;
+
+  // Replay detection — must run before claim_id check so retries after
+  // successful finalize (which clears claim fields) still return replay.
+  if (currentExtId === extListingId && currentStage === 'published') {
+    return json({
+      listing_id: listingId, outcome: 'replay',
+    } satisfies PublishFinalizationResult);
+  }
+
   if (currentClaimId !== claimId) {
     return json({
       listing_id: listingId, outcome: 'claim_not_found',
     } satisfies PublishFinalizationResult);
   }
 
-  // Replay detection
-  const currentExtId = typeof listing.external_listing_id === 'string' ? listing.external_listing_id : null;
-  if (currentExtId === extListingId && currentStage === 'published') {
-    return json({
-      listing_id: listingId, outcome: 'replay',
-    } satisfies PublishFinalizationResult);
-  }
   // Identity conflict
   if (currentExtId && currentExtId !== extListingId) {
     return json({
