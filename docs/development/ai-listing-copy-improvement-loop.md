@@ -531,3 +531,52 @@ writes, retries, errors, runtime, and content-score delta. Any critical error,
 stale revision, unexpected protected-field change, request-budget breach, or
 write-budget breach stops the run. Recurring activation requires registration
 in the canonical database workload registry and a reviewed release commit.
+
+## Implementation and live status
+
+Implemented and released on 2026-08-09 in commit `36e3bbb`.
+
+Available commands:
+
+```bash
+# Proposal-only run; canonical listing content is not changed
+npm run job:listing:improve-copy -- \
+  --mode=dry_run --platform=rakuten --limit=10
+
+# Route valid proposals to ready_for_review
+COPY_IMPROVEMENT_ENABLED=true \
+npm run job:listing:improve-copy -- \
+  --mode=approval --platform=rakuten --limit=10
+
+# Apply only proposals an operator already marked approved
+COPY_IMPROVEMENT_ENABLED=true \
+npm run job:listing:improve-copy -- \
+  --apply-approved --platform=rakuten --limit=10
+
+# Auto mode remains fail-closed without an explicit shop allowlist
+COPY_IMPROVEMENT_ENABLED=true \
+COPY_IMPROVEMENT_AUTO_SHOPS=homebliss \
+npm run job:listing:improve-copy -- \
+  --mode=auto --platform=rakuten --shop-code=homebliss --limit=1
+```
+
+Release evidence:
+
+- 46 focused listing-copy tests pass.
+- 144 internal catalog API tests pass.
+- Root and web TypeScript checks pass.
+- Production web build passes.
+- Real local `qwen3.5:9b` smoke returned a valid grounded title and description
+  without a repair attempt.
+- GitHub internal API verification run `31311617973` passed.
+- Cloudflare Pages deployment run `31311617980` passed.
+- `https://agent.homesbliss.net` returned HTTP 200 after deployment.
+- The protected content-update endpoint returned HTTP 401 without a bearer
+  token, confirming that the deployed apply boundary remains authenticated.
+
+The code and protected apply API are live. Automatic execution and recurring
+scheduling remain disabled. A hosted one-listing canary has not been executed
+because this workstation does not have the approved Supabase and internal API
+runtime credentials. The next production step is to provision the approved
+runtime environment, select one Rakuten listing and shop, run `dry_run`, review
+the report, and only then enable `approval` or `auto` for that shop.
