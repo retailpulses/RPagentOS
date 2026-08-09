@@ -127,6 +127,24 @@ export interface MercariMapping {
   status: string | null;
   queued_at: string | null;
   opened_at: string | null;
+  // ── v2.0 lifecycle fields ──
+  listing_id?: string;
+  lifecycle_stage?: string;
+  content_revision?: number;
+  content_origin?: string;
+  title?: string | null;
+  description?: string | null;
+  images?: unknown[] | null;
+  score_total?: number | null;
+  score_modules?: Record<string, unknown> | null;
+  scored_content_revision?: number | null;
+  scored_at?: string | null;
+  score_config_version?: string | null;
+  score_config_hash?: string | null;
+  enhancement_key?: string | null;
+  enhancement_model?: string | null;
+  published_content_revision?: number | null;
+  published_at?: string | null;
 }
 
 export type ListingCandidateResult =
@@ -162,6 +180,173 @@ export interface ListingCandidatesResponse {
   results: ListingCandidateResult[];
 }
 
+// ── v2.0 Lifecycle Contracts ───────────────────────────────────────────
+
+export type LifecycleStage = 'draft' | 'enhanced' | 'publish_pending' | 'published' | 'retired';
+
+export interface CanonicalListingContent {
+  listing_id: string;
+  shop_code: string;
+  lifecycle_stage: LifecycleStage;
+  content_revision: number;
+  content_origin: 'giga_generated' | 'ai_enhanced' | 'operator';
+  title: string | null;
+  description: string | null;
+  images: unknown[] | null;
+  category_id: string | null;
+  score_total: number | null;
+  score_modules: Record<string, unknown> | null;
+  scored_content_revision: number | null;
+  scored_at: string | null;
+  external_listing_id: string | null;
+  external_sku_id: string | null;
+  listing_status: string | null;
+  enhancement_key: string | null;
+  enhancement_model: string | null;
+  published_content_revision: number | null;
+  published_at: string | null;
+}
+
+export interface DraftMaterializationRequest {
+  source_variant_ids: string[];
+  platform: string;
+  shops: string[];
+  source_content_hash: string;
+  initial_title: string;
+  initial_description: string;
+  initial_category_id: string;
+  initial_images: string[];
+}
+
+export interface DraftMaterializationResultRow {
+  listing_id: string;
+  shop_code: string;
+  item_code: string;
+  lifecycle_stage: LifecycleStage;
+  content_revision: number;
+  outcome: 'created' | 'unchanged' | 'protected';
+}
+
+export interface DraftMaterializationResponse {
+  results: DraftMaterializationResultRow[];
+}
+
+export interface ListingContentUpdateRequest {
+  expected_content_revision: number;
+  title?: string;
+  description?: string;
+  images?: string[];
+  content_origin: 'ai_enhanced' | 'operator';
+  enhancement_key?: string;
+  enhancement_model?: string;
+  enhancement_prompt_version?: string;
+  idempotency_key: string;
+}
+
+export interface ListingContentUpdateResponse {
+  listing_id: string;
+  content_revision: number;
+  lifecycle_stage: LifecycleStage;
+  outcome: 'updated' | 'replay' | 'stale_revision';
+}
+
+export interface ListingScoreEntry {
+  listing_id: string;
+  expected_content_revision: number;
+  total: number;
+  modules: Record<string, { score: number; max_score: number; reason: string }>;
+  config_version: string;
+  config_hash: string;
+}
+
+export interface ListingScoreResultRow {
+  listing_id: string;
+  outcome: 'written' | 'stale_revision' | 'not_found';
+}
+
+export interface ListingScoresBatchResponse {
+  results: ListingScoreResultRow[];
+}
+
+export interface PublishClaimRequest {
+  expected_content_revision: number;
+  score_total: number;
+  config_hash: string;
+  idempotency_key: string;
+}
+
+export interface PublishClaimResult {
+  listing_id: string;
+  claim_id: string;
+  content_revision: number;
+  stage_before: LifecycleStage;
+  outcome: 'claimed' | 'replay' | 'stale' | 'not_eligible';
+}
+
+export interface PublishFinalizationRequest {
+  claim_id: string;
+  external_listing_id: string;
+  external_sku_id: string;
+  sku_code: string;
+  listing_status: string;
+  observed_title: string;
+  observed_description: string;
+  observed_images: unknown[];
+  observed_at: string;
+}
+
+export interface PublishFinalizationResult {
+  listing_id: string;
+  outcome: 'finalized' | 'replay' | 'claim_not_found' | 'identity_conflict';
+}
+
+export interface PublishReleaseRequest {
+  claim_id: string;
+  reason: string;
+}
+
+export interface PublishReleaseResult {
+  listing_id: string;
+  outcome: 'released' | 'claim_not_found' | 'not_pending';
+}
+
+export interface RetireListingRequest {
+  expected_content_revision: number;
+  reason: string;
+}
+
+export interface ListingLifecycleResult {
+  listing_id: string;
+  lifecycle_stage: LifecycleStage;
+  outcome: 'transitioned' | 'stale' | 'not_found';
+}
+
+export interface ListingObservationEntry {
+  listing_id: string;
+  external_listing_id: string;
+  external_sku_id: string | null;
+  listing_status: string;
+  observed_title: string | null;
+  observed_description: string | null;
+  observed_images: unknown[] | null;
+  observed_at: string;
+}
+
+export interface ListingObservationResultRow {
+  listing_id: string;
+  outcome: 'observed' | 'not_found';
+  content_drift: boolean;
+}
+
+export interface ListingObservationsResponse {
+  results: ListingObservationResultRow[];
+}
+
+export interface ListingsStageQueryResponse {
+  listings: CanonicalListingContent[];
+  next_cursor: string | null;
+}
+
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 const JSON_HEADERS = {
@@ -169,14 +354,14 @@ const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
 };
 
-function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...JSON_HEADERS, ...headers },
   });
 }
 
-function tokensEqual(actual: string, expected: string): boolean {
+export function tokensEqual(actual: string, expected: string): boolean {
   const length = Math.max(actual.length, expected.length);
   let mismatch = actual.length ^ expected.length;
 
@@ -187,7 +372,7 @@ function tokensEqual(actual: string, expected: string): boolean {
   return mismatch === 0;
 }
 
-function bearerToken(request: Request): string | null {
+export function bearerToken(request: Request): string | null {
   const authorization = request.headers.get('authorization');
   if (!authorization?.startsWith('Bearer ')) return null;
   const token = authorization.slice('Bearer '.length).trim();
@@ -205,7 +390,7 @@ function authorized(request: Request, expectedToken: string): boolean {
   return Boolean(token && tokensEqual(token, expectedToken));
 }
 
-function pipelineConfigurationReady(
+export function pipelineConfigurationReady(
   env: InternalCatalogEnv,
 ): env is InternalCatalogEnv & Required<Pick<InternalCatalogEnv, 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>> {
   return Boolean(
@@ -215,7 +400,7 @@ function pipelineConfigurationReady(
   );
 }
 
-function pipelineAuthorized(request: Request, env: InternalCatalogEnv): boolean {
+export function pipelineAuthorized(request: Request, env: InternalCatalogEnv): boolean {
   const token = bearerToken(request);
   if (!token) return false;
   return Boolean(
@@ -226,16 +411,16 @@ function pipelineAuthorized(request: Request, env: InternalCatalogEnv): boolean 
   );
 }
 
-function postgrestIn(values: string[]): string {
+export function postgrestIn(values: string[]): string {
   const quoted = values.map((value) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   return `in.(${quoted.join(',')})`;
 }
 
-function identityKey(value: string): string {
+export function identityKey(value: string): string {
   return value.toUpperCase();
 }
 
-function postgrestExactIlikeOr(values: string[]): string {
+export function postgrestExactIlikeOr(values: string[]): string {
   const filters = values.map((value) => {
     const pattern = value
       .replace(/\\/g, '\\\\')
@@ -247,7 +432,7 @@ function postgrestExactIlikeOr(values: string[]): string {
   return `(${filters.join(',')})`;
 }
 
-function chunks<T>(values: T[], size: number): T[][] {
+export function chunks<T>(values: T[], size: number): T[][] {
   const result: T[][] = [];
   for (let offset = 0; offset < values.length; offset += size) {
     result.push(values.slice(offset, offset + size));
@@ -286,7 +471,7 @@ async function postgrestWrite(
   return result as Record<string, unknown>[];
 }
 
-async function supabaseRows(
+export async function supabaseRows(
   env: Required<Pick<InternalCatalogEnv, 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>>,
   path: string,
   params: Record<string, string>,
@@ -618,7 +803,7 @@ const MAX_FIELD_LENGTHS: Record<string, number> = {
 
 const METADATA_MAX_BYTES = 16 * 1024;
 
-function validateIsoTimestamp(value: string): boolean {
+export function validateIsoTimestamp(value: string): boolean {
   if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return false;
   const date = new Date(value);
   return !Number.isNaN(date.getTime()) && value.includes('T');
@@ -2000,6 +2185,23 @@ export async function handleListingCandidatesQuery(
   }
 
   let listingRows: unknown[];
+  // Select the full v2.0 lifecycle columns.  If the migration hasn't been
+  // applied yet the new columns won't exist — fall back to legacy columns
+  // so the endpoint remains usable before migration.
+  const LIFECYCLE_COLUMNS = [
+    'lifecycle_stage', 'content_revision', 'content_origin',
+    'title', 'description', 'images',
+    'score_total', 'score_modules', 'scored_content_revision', 'scored_at',
+    'score_config_version', 'score_config_hash',
+    'enhancement_key', 'enhancement_model',
+    'published_content_revision', 'published_at',
+  ];
+  const LEGACY_SELECT = [
+    'id', 'variant_id', 'external_listing_id', 'external_sku_id',
+    'shop_code', 'listing_status', 'raw_payload',
+  ];
+  const V2_SELECT = [...LEGACY_SELECT, ...LIFECYCLE_COLUMNS];
+
   try {
     listingRows = variantIds.length === 0
       ? []
@@ -2007,17 +2209,37 @@ export async function handleListingCandidatesQuery(
         supabaseEnv,
         'platform_listings',
         {
-          select: 'id,variant_id,external_listing_id,shop_code,listing_status,raw_payload',
-          platform: 'eq.mercari',
+          select: V2_SELECT.join(','),
+          platform: `eq.mercari`,
           variant_id: postgrestIn(variantIds),
           shop_code: postgrestIn(MERCARI_SHOPS),
           limit: String(variantIds.length * MERCARI_SHOPS.length + 1),
         },
         fetchFn,
       );
-  } catch (error) {
-    console.error('listing-candidates listing read failed', error);
-    return json({ error: 'catalog_upstream_error' }, 502);
+  } catch (_v2Error) {
+    // Pre-migration fallback: new columns don't exist yet.
+    // Retry with only the legacy column set.
+    console.warn('listing-candidates v2 select failed, falling back to legacy columns');
+    try {
+      listingRows = variantIds.length === 0
+        ? []
+        : await supabaseRows(
+          supabaseEnv,
+          'platform_listings',
+          {
+            select: LEGACY_SELECT.join(','),
+            platform: `eq.mercari`,
+            variant_id: postgrestIn(variantIds),
+            shop_code: postgrestIn(MERCARI_SHOPS),
+            limit: String(variantIds.length * MERCARI_SHOPS.length + 1),
+          },
+          fetchFn,
+        );
+    } catch (error) {
+      console.error('listing-candidates listing read failed', error);
+      return json({ error: 'catalog_upstream_error' }, 502);
+    }
   }
 
   const listingIds: string[] = [];
@@ -2026,6 +2248,22 @@ export async function handleListingCandidatesQuery(
     external_listing_id: string | null;
     listing_status: string | null;
     raw_payload: Record<string, unknown> | null;
+    lifecycle_stage: string | null;
+    content_revision: number | null;
+    content_origin: string | null;
+    title: string | null;
+    description: string | null;
+    images: unknown[] | null;
+    score_total: number | null;
+    score_modules: Record<string, unknown> | null;
+    scored_content_revision: number | null;
+    scored_at: string | null;
+    score_config_version: string | null;
+    score_config_hash: string | null;
+    enhancement_key: string | null;
+    enhancement_model: string | null;
+    published_content_revision: number | null;
+    published_at: string | null;
   }>>>();
 
   for (const value of listingRows) {
@@ -2046,6 +2284,23 @@ export async function handleListingCandidatesQuery(
       listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
       raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
         ? row.raw_payload as Record<string, unknown> : null,
+      lifecycle_stage: typeof row.lifecycle_stage === 'string' ? row.lifecycle_stage : null,
+      content_revision: typeof row.content_revision === 'number' ? row.content_revision : null,
+      content_origin: typeof row.content_origin === 'string' ? row.content_origin : null,
+      title: typeof row.title === 'string' ? row.title : null,
+      description: typeof row.description === 'string' ? row.description : null,
+      images: Array.isArray(row.images) ? row.images : null,
+      score_total: typeof row.score_total === 'number' ? row.score_total : null,
+      score_modules: row.score_modules && typeof row.score_modules === 'object' && !Array.isArray(row.score_modules)
+        ? row.score_modules as Record<string, unknown> : null,
+      scored_content_revision: typeof row.scored_content_revision === 'number' ? row.scored_content_revision : null,
+      scored_at: typeof row.scored_at === 'string' ? row.scored_at : null,
+      score_config_version: typeof row.score_config_version === 'string' ? row.score_config_version : null,
+      score_config_hash: typeof row.score_config_hash === 'string' ? row.score_config_hash : null,
+      enhancement_key: typeof row.enhancement_key === 'string' ? row.enhancement_key : null,
+      enhancement_model: typeof row.enhancement_model === 'string' ? row.enhancement_model : null,
+      published_content_revision: typeof row.published_content_revision === 'number' ? row.published_content_revision : null,
+      published_at: typeof row.published_at === 'string' ? row.published_at : null,
     });
     shopMap.set(row.shop_code as string, entries);
   }
@@ -2255,11 +2510,14 @@ export async function handleListingCandidatesQuery(
     let hasMappingConflict = false;
     for (const [shopCode, listingArr] of shopMap.entries()) {
       for (const listing of listingArr) {
-        const skus = skusByListingId.get(listing.id) ?? [];
-        if (!listing.external_listing_id || skus.length !== 1
-          || !skus[0].external_sku_id || !skus[0].sku_code) {
-          hasMappingConflict = true;
-          break;
+        // Draft/enhanced listings without external IDs are valid (pre-publication).
+        // Only flag conflict when a listing HAS external IDs but incomplete SKU data.
+        if (listing.external_listing_id) {
+          const skus = skusByListingId.get(listing.id) ?? [];
+          if (skus.length !== 1 || !skus[0].external_sku_id || !skus[0].sku_code) {
+            hasMappingConflict = true;
+            break;
+          }
         }
       }
       if (hasMappingConflict) break;
@@ -2300,6 +2558,24 @@ export async function handleListingCandidatesQuery(
           ?? extractTimestampFromState(sku?.raw_payload ?? null, 'queued_at'),
         opened_at: extractTimestampFromState(listing.raw_payload, 'opened_at')
           ?? extractTimestampFromState(sku?.raw_payload ?? null, 'opened_at'),
+        // ── v2.0 lifecycle fields ──
+        listing_id: listing.id,
+        lifecycle_stage: listing.lifecycle_stage ?? undefined,
+        content_revision: listing.content_revision ?? undefined,
+        content_origin: listing.content_origin ?? undefined,
+        title: listing.title,
+        description: listing.description,
+        images: listing.images,
+        score_total: listing.score_total ?? undefined,
+        score_modules: listing.score_modules ?? undefined,
+        scored_content_revision: listing.scored_content_revision ?? undefined,
+        scored_at: listing.scored_at ?? undefined,
+        score_config_version: listing.score_config_version ?? undefined,
+        score_config_hash: listing.score_config_hash ?? undefined,
+        enhancement_key: listing.enhancement_key ?? undefined,
+        enhancement_model: listing.enhancement_model ?? undefined,
+        published_content_revision: listing.published_content_revision ?? undefined,
+        published_at: listing.published_at ?? undefined,
       };
     }
 
