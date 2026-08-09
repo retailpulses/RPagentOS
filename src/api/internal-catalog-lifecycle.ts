@@ -522,6 +522,7 @@ export async function handleListingContentUpdate(
   try {
     const patched = await postgrestPatch(
       supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn, expectedRevision,
+      ['lifecycle_stage=in.(draft,enhanced)'],
     );
     if (!patched) {
       // Revision guard blocked the write — another writer changed the row.
@@ -802,6 +803,7 @@ export async function handlePublishClaim(
     }, fetchFn, expectedRevision, [
       'lifecycle_stage=in.(draft,enhanced)',
       'publish_claim_id=is.null',
+      `scored_content_revision=eq.${expectedRevision}`,
     ]);
     if (!patched) {
       return json({
@@ -909,6 +911,8 @@ export async function handlePublishFinalization(
       observed_at: observedAt,
       content_drift: false,
       platform_updated_at: observedAt,
+      publish_claim_id: null,
+      publish_claimed_at: null,
       publish_idempotency_key: null,
     }, fetchFn, undefined, [
       `publish_claim_id=eq.${claimId}`,
