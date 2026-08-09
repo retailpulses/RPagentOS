@@ -661,7 +661,7 @@ export async function handleListingsStageQuery(
       'title', 'description', 'images',
       'score_total', 'score_modules', 'scored_content_revision', 'scored_at',
       'enhancement_key', 'enhancement_model',
-      'external_listing_id', 'external_sku_id', 'listing_status',
+      'external_listing_id', 'listing_status',
       'published_content_revision', 'published_at', 'updated_at',
     ].join(','),
     platform: `eq.${platform}`,
