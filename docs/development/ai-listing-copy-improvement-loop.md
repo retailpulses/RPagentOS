@@ -575,8 +575,18 @@ Release evidence:
   token, confirming that the deployed apply boundary remains authenticated.
 
 The code and protected apply API are live. Automatic execution and recurring
-scheduling remain disabled. A hosted one-listing canary has not been executed
-because this workstation does not have the approved Supabase and internal API
-runtime credentials. The next production step is to provision the approved
-runtime environment, select one Rakuten listing and shop, run `dry_run`, review
-the report, and only then enable `approval` or `auto` for that shop.
+scheduling remain disabled.
+
+The first hosted one-listing canary completed in GitHub Actions run
+`31312834322` on 2026-08-09 using local `qwen3.5:4b` inference on the ephemeral
+runner. It selected one production Rakuten listing, made 13 database/model
+requests, read 73 rows, and wrote three new review/audit rows. The candidate
+remained invalid after one repair attempt, so no work item was routed for
+approval and no canonical listing content was changed. This-run result:
+`selected=1`, `valid=0`, `invalid=1`, `failed=0`, `autoApplied=0`, runtime
+391.230 seconds, zero unchanged writes, zero statement timeouts, and zero
+canonical business rows changed. The apply kill switch remained active.
+
+The next production step is to review the recorded validation failure and
+improve the proposal contract or prompt before another bounded dry run. Do not
+advance this candidate to `approval` or `auto`.
