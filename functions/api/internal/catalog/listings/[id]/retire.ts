@@ -1,4 +1,4 @@
-import { handleRetireListing, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
+import { handleRetireListing, type InternalCatalogEnv } from '../../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;

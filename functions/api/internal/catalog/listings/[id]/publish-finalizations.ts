@@ -1,4 +1,4 @@
-import { handlePublishFinalization, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
+import { handlePublishFinalization, type InternalCatalogEnv } from '../../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;
