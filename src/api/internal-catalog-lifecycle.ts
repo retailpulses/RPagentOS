@@ -95,7 +95,7 @@ async function fetchSingleListing(
     'platform_listings',
     {
       select: [
-        'id', 'platform', 'shop_code', 'item_code', 'variant_id',
+        'id', 'platform', 'shop_code', 'variant_id',
         'external_listing_id', 'listing_status',
         'lifecycle_stage', 'content_revision', 'content_origin',
         'title', 'description', 'images',
@@ -324,11 +324,11 @@ export async function handleDraftMaterialization(
         continue;
       }
 
-      // New draft
+      // New draft — only includes columns that exist on platform_listings
+      // (variant_id and lifecycle columns from migration, plus canonical content columns)
       toUpsert.push({
         platform,
         shop_code: shop,
-        item_code: variant.item_code,
         variant_id: variantId,
         source_variant_id: variantId,
         source_content_hash: sourceContentHash,
@@ -338,8 +338,6 @@ export async function handleDraftMaterialization(
         title: initialTitle,
         description: initialDescription,
         images: initialImages,
-        category_id: initialCategoryId || null,
-        listing_status: null,
       });
     }
   }
@@ -347,7 +345,7 @@ export async function handleDraftMaterialization(
   if (toUpsert.length > 0) {
     try {
       const insertUrl = new URL('/rest/v1/platform_listings', supabaseEnv.SUPABASE_URL.replace(/\/$/, ''));
-      insertUrl.searchParams.set('on_conflict', 'platform,shop_code,item_code');
+      insertUrl.searchParams.set('on_conflict', 'platform,shop_code,variant_id');
       const response = await fetchFn(
         insertUrl,
         {
@@ -368,11 +366,12 @@ export async function handleDraftMaterialization(
       }
       const inserted = await response.json() as Record<string, unknown>[];
       for (const row of inserted) {
-        if (typeof row.id === 'string' && typeof row.shop_code === 'string' && typeof row.item_code === 'string') {
+        if (typeof row.id === 'string' && typeof row.shop_code === 'string' && typeof row.variant_id === 'string') {
+          const variant = variantMap.get(row.variant_id);
           results.results.push({
             listing_id: row.id,
             shop_code: row.shop_code,
-            item_code: row.item_code,
+            item_code: variant?.item_code ?? '',
             lifecycle_stage: 'draft' as LifecycleStage,
             content_revision: 1,
             outcome: 'created',

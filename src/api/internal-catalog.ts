@@ -2466,6 +2466,22 @@ export async function handleListingCandidatesQuery(
           listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
           raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
             ? row.raw_payload as Record<string, unknown> : null,
+          lifecycle_stage: null,
+          content_revision: null,
+          content_origin: null,
+          title: null,
+          description: null,
+          images: null,
+          score_total: null,
+          score_modules: null,
+          scored_content_revision: null,
+          scored_at: null,
+          score_config_version: null,
+          score_config_hash: null,
+          enhancement_key: null,
+          enhancement_model: null,
+          published_content_revision: null,
+          published_at: null,
         });
         shopMap.set(shopCode, shopEntries);
 

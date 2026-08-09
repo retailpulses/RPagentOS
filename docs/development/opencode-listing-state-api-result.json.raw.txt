@@ -1,0 +1,46 @@
+```json
+{
+  "task_summary": "Implemented POST /api/internal/catalog/listing-state/batch — owner-controlled internal API endpoint for deterministic marketplace listing state writes. Supports 1-100 updates per request with validation, variant resolution, conflict detection, legal status transitions, idempotent retry, raw_payload preservation, and batched PostgREST upserts into platform_listings and platform_listing_skus.",
+  "scope_statement": "Bounded to the internal API handler in src/api/internal-catalog.ts, one Cloudflare Pages route at functions/api/internal/catalog/listing-state/batch.ts, comprehensive mock-fetch tests in src/api/internal-catalog-listing-state.test.ts, tsconfig update, documentation update, and package.json test script update. No migrations, credentials, databases, networks, deployments, or production access. No unrelated files modified.",
+  "files_examined": [
+    "src/api/internal-catalog.ts",
+    "src/api/internal-catalog.test.ts",
+    "src/api/internal-catalog-batch.test.ts",
+    "functions/api/internal/catalog/sku/[itemCode].ts",
+    "functions/api/internal/catalog/inventory-query.ts",
+    "tsconfig.internal-api.json",
+    "tsconfig.json",
+    "package.json",
+    "docs/development/product-catalog-internal-api.md",
+    "contracts/internal-catalog/inventory-query-v1.fixture.json",
+    "supabase/migrations/20260629150046_init_agent_os_core.sql",
+    "supabase/migrations/20260706000000_product_listing_intelligence_schema.sql",
+    "supabase/migrations/20260706000001_fix_unique_indexes_for_upsert.sql",
+    "supabase/migrations/20260706000400_product_import_upsert_constraints.sql"
+  ],
+  "files_modified": [
+    "src/api/internal-catalog.ts",
+    "functions/api/internal/catalog/listing-state/batch.ts",
+    "src/api/internal-catalog-listing-state.test.ts",
+    "tsconfig.internal-api.json",
+    "docs/development/product-catalog-internal-api.md",
+    "package.json"
+  ],
+  "tools_used": ["task", "read", "edit", "write", "bash", "glob", "grep", "todowrite"],
+  "commands_or_checks_run": [
+    "npm run typecheck:internal-api (passed)",
+    "npm run test:internal-api (60 tests, 60 pass, 0 fail)"
+  ],
+  "findings": [
+    "Existing internal-catalog.ts exports two handlers (handleCatalogSkuRequest, handleCatalogInventoryQueryRequest) with constant-time Bearer auth, PostgREST reads, and fail-closed design. New handleListingStateBatch follows the same patterns.",
+    "platform_listings has unique(platform, shop_code, external_listing_id); platform_listing_skus has unique(listing_id, sku_position). Both support upsert via PostgREST resolution=merge-duplicates.",
+    "product_variants.item_code has a unique index; resolved case-insensitively via ilike PostgREST filters.",
+    "Schema expanded by intelligence migration includes listing_status (text, default 'unknown'), raw_payload (jsonb), platform_updated_at (timestamptz), and sku fields on platform_listing_skus."
+  ],
+  "risks": [
+    "PostgREST upsert with return=representation returns rows in input order for bulk POST; if this assumption is wrong, SKU listing_id mapping could misalign. Verified via PostgREST docs behavior.",
+    "postgrestIn helper escapes double quotes in values; external_listing_ids with double quotes would produce incorrect filters. Low risk — marketplace listing IDs rarely contain quotes."
+  ],
+  "unresolved_items": []
+}
+```

@@ -1,0 +1,62 @@
+```json
+{
+  "task_summary": "Implemented two new authenticated product-catalog internal API endpoints: POST /api/internal/catalog/source-imports/batch (GigaB2B source import with variant creation, commercial upsert, run/row tracking, and replay idempotency) and POST /api/internal/catalog/listing-candidates/query (read-only batch query returning canonical product data with Mercari shop1-shop4 mappings). Added 67 new tests (136 total, all passing). Both typecheck and test suites pass cleanly.",
+  "scope_statement": "Added handler functions, types, Page routes, tests, tsconfig entries, and documentation for source-imports/batch and listing-candidates/query endpoints. No credentials, databases, network calls, or production access used. No migrations created. Reused existing catalog authentication and PostgREST helpers.",
+  "files_examined": [
+    "src/api/internal-catalog.ts",
+    "src/api/internal-catalog.test.ts",
+    "src/api/internal-catalog-batch.test.ts",
+    "src/api/internal-catalog-listing-state.test.ts",
+    "src/packages/listing-import/types.ts",
+    "functions/api/internal/catalog/sku/[itemCode].ts",
+    "functions/api/internal/catalog/inventory-query.ts",
+    "functions/api/internal/catalog/listing-state/batch.ts",
+    "supabase/migrations/20260706000000_product_listing_intelligence_schema.sql",
+    "supabase/migrations/20260629150046_init_agent_os_core.sql",
+    "supabase/migrations/20260706000001_fix_unique_indexes_for_upsert.sql",
+    "supabase/migrations/20260706000400_product_import_upsert_constraints.sql",
+    "supabase/migrations/20260717040000_catalogsync_marketplace_projection_v1.sql",
+    "tsconfig.internal-api.json",
+    "package.json",
+    "docs/development/product-catalog-internal-api.md",
+    "supabase/verify_mercari_pricing_consistency.sql"
+  ],
+  "files_modified": [
+    "src/api/internal-catalog.ts",
+    "src/api/internal-catalog-source-imports.test.ts",
+    "src/api/internal-catalog-listing-candidates.test.ts",
+    "functions/api/internal/catalog/source-imports/batch.ts",
+    "functions/api/internal/catalog/listing-candidates/query.ts",
+    "tsconfig.internal-api.json",
+    "package.json",
+    "docs/development/product-catalog-internal-api.md"
+  ],
+  "tools_used": [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Glob",
+    "Grep",
+    "Task",
+    "TodoWrite"
+  ],
+  "commands_or_checks_run": [
+    "npm run typecheck:internal-api (passed with 0 errors)",
+    "npm run test:internal-api (136 tests, 136 pass, 0 fail)"
+  ],
+  "findings": [
+    "Existing handler pattern uses DI via fetchFn parameter for mock testing",
+    "PostgREST helpers (supabaseRows, postgrestWrite) already support batched reads/writes with merge-duplicates",
+    "No pipeline_lock table exists; run resolution uses read-before-write by source_system + file_hash",
+    "Listing-candidates handler needed array-based shop map to detect multiple listings per shop conflict",
+    "product_variants.sku is the unique key for variant upserts; item_code has a partial unique index",
+    "product_commercials uses variant_id as primary key for upserts"
+  ],
+  "risks": [
+    "source_import_runs has no unique constraint on (source_system, file_hash) — read-before-write could race if pipelined lock is absent",
+    "Run finalization PATCH failure is logged but not returned as error to caller — partial success possible if PATCH fails after row/commercial upserts succeed"
+  ],
+  "unresolved_items": []
+}
+```

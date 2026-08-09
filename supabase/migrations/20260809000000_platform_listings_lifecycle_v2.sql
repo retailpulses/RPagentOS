@@ -90,11 +90,11 @@ ALTER TABLE public.platform_listings
   ADD CONSTRAINT valid_lifecycle_stage CHECK (
     lifecycle_stage IN ('draft', 'enhanced', 'publish_pending', 'published', 'retired')
   );
--- Unique listing grain: one row per platform/shop/item_code.
+-- Unique listing grain: one row per platform/shop/variant.
 -- External identity uniqueness is a separate nullable unique index.
 ALTER TABLE public.platform_listings
   ADD CONSTRAINT uq_platform_listings_grain
-  UNIQUE (platform, shop_code, item_code);
+  UNIQUE (platform, shop_code, variant_id);
 ALTER TABLE public.platform_listings
   ADD CONSTRAINT valid_score_range CHECK (
     score_total IS NULL OR (score_total >= 0 AND score_total <= 94)
