@@ -1,4 +1,4 @@
-import { handleListingContentUpdate, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog-lifecycle.js';
+import { handleListingContentUpdate, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;

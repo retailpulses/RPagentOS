@@ -1,4 +1,4 @@
-import { handleDraftMaterialization, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog-lifecycle.js';
+import { handleDraftMaterialization, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;

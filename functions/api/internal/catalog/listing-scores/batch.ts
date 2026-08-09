@@ -1,4 +1,4 @@
-import { handleListingScoresBatch, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog-lifecycle.js';
+import { handleListingScoresBatch, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;

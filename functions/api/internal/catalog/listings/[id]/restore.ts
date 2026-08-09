@@ -1,4 +1,4 @@
-import { handleRestoreListing, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog-lifecycle.js';
+import { handleRestoreListing, type InternalCatalogEnv } from '../../../../../src/api/internal-catalog.js';
 
 interface PagesFunctionContext {
   request: Request;

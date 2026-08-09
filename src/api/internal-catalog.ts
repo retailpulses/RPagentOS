@@ -2629,3 +2629,18 @@ export async function handleListingCandidatesQuery(
 
   return json(results);
 }
+
+// Re-export v2.0 lifecycle handlers so route files can import everything
+// from a single module that the Pages build can resolve.
+export {
+  handleDraftMaterialization,
+  handleListingContentUpdate,
+  handleListingScoresBatch,
+  handleListingsStageQuery,
+  handlePublishClaim,
+  handlePublishFinalization,
+  handlePublishRelease,
+  handleRetireListing,
+  handleRestoreListing,
+  handleListingObservationsBatch,
+} from "./internal-catalog-lifecycle.js";
