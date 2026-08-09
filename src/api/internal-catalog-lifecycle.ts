@@ -513,7 +513,18 @@ export async function handleListingContentUpdate(
   patch.publish_claimed_at = null;
 
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn, expectedRevision);
+    const patched = await postgrestPatch(
+      supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn, expectedRevision,
+    );
+    if (!patched) {
+      // Revision guard blocked the write — another writer changed the row.
+      return json({
+        listing_id: listingId,
+        content_revision: currentRevision,
+        lifecycle_stage: currentStage as LifecycleStage,
+        outcome: 'stale_revision',
+      } satisfies ListingContentUpdateResponse, 409);
+    }
   } catch (error) {
     console.error('content-update patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
@@ -596,7 +607,7 @@ export async function handleListingScoresBatch(
     }
 
     try {
-      await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+      const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
         score_total: total,
         score_modules: modules && typeof modules === 'object' ? modules : null,
         score_config_version: typeof configVersion === 'string' ? configVersion : null,
@@ -604,7 +615,11 @@ export async function handleListingScoresBatch(
         scored_content_revision: expectedRevision,
         scored_at: new Date().toISOString(),
       }, fetchFn, expectedRevision);
-      results.results.push({ listing_id: listingId, outcome: 'written' });
+      if (!patched) {
+        results.results.push({ listing_id: listingId, outcome: 'stale_revision' });
+      } else {
+        results.results.push({ listing_id: listingId, outcome: 'written' });
+      }
     } catch (error) {
       console.error('score-write failed', error);
       results.results.push({ listing_id: listingId, outcome: 'not_found' });
@@ -772,12 +787,18 @@ export async function handlePublishClaim(
 
   const claimId = crypto.randomUUID();
   try {
-    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    const patched = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
       lifecycle_stage: 'publish_pending',
       publish_claim_id: claimId,
       publish_idempotency_key: idempotencyKey,
       publish_claimed_at: new Date().toISOString(),
     }, fetchFn, expectedRevision);
+    if (!patched) {
+      return json({
+        listing_id: listingId, claim_id: '', content_revision: currentRevision,
+        stage_before: currentStage as LifecycleStage, outcome: 'stale',
+      } satisfies PublishClaimResult);
+    }
   } catch (error) {
     console.error('publish-claim patch failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
