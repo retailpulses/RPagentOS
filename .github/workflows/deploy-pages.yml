@@ -52,7 +52,9 @@ jobs:
             echo "::error::ORDERMGMT_CATALOG_API_TOKEN is not configured"
             exit 1
           fi
-          printf '%s' "$ORDERMGMT_CATALOG_API_TOKEN" \
+          # Wrangler reads the secret as an interactive line. Terminate stdin
+          # with one newline; Wrangler strips the delimiter from the value.
+          printf '%s\n' "$ORDERMGMT_CATALOG_API_TOKEN" \
             | npx --yes wrangler@4.80.0 pages secret put ORDERMGMT_CATALOG_API_TOKEN \
                 --project-name rpagentos
 
