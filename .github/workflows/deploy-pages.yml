@@ -62,3 +62,22 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/web/dist --project-name rpagentos --branch main
+
+      - name: Verify OrderMgmt catalog credential
+        env:
+          ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
+        run: |
+          STATUS=""
+          for ATTEMPT in 1 2 3 4 5; do
+            STATUS=$(curl -sS -o /tmp/catalog-smoke.json -w '%{http_code}' \
+              -H "Authorization: Bearer $ORDERMGMT_CATALOG_API_TOKEN" \
+              'https://rpagentos.pages.dev/api/internal/catalog/sku/__ordermgmt_deploy_smoke_missing__')
+            if [ "$STATUS" = "404" ]; then
+              echo "✅ OrderMgmt catalog credential accepted by production"
+              exit 0
+            fi
+            echo "Attempt $ATTEMPT/5 returned HTTP $STATUS; retrying"
+            sleep 3
+          done
+          echo "::error::OrderMgmt catalog credential smoke failed (expected authenticated 404, got $STATUS)"
+          exit 1
