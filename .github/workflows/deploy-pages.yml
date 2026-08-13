@@ -42,6 +42,15 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run web:build
 
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist --project-name rpagentos --branch main
+
+      # Direct Pages deployments may refresh the production deployment config,
+      # so synchronize the secret after the deployment has been created.
       - name: Synchronize OrderMgmt catalog API token
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -52,18 +61,9 @@ jobs:
             echo "::error::ORDERMGMT_CATALOG_API_TOKEN is not configured"
             exit 1
           fi
-          # Wrangler reads the secret as an interactive line. Terminate stdin
-          # with one newline; Wrangler strips the delimiter from the value.
           printf '%s\n' "$ORDERMGMT_CATALOG_API_TOKEN" \
             | npx --yes wrangler@4.80.0 pages secret put ORDERMGMT_CATALOG_API_TOKEN \
                 --project-name rpagentos
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web/dist --project-name rpagentos --branch main
 
       - name: Verify OrderMgmt catalog credential
         env:
