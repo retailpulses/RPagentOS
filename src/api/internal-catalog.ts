@@ -444,6 +444,27 @@ export function ordermgmtCatalogAuthorized(request: Request, env: InternalCatalo
   );
 }
 
+function catalogSkuReadConfigurationReady(
+  env: InternalCatalogEnv,
+): env is InternalCatalogEnv & Required<Pick<InternalCatalogEnv, 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>> {
+  return Boolean(
+    env.SUPABASE_URL
+    && env.SUPABASE_SERVICE_ROLE_KEY
+    && (env.INTERNAL_CATALOG_API_TOKEN || env.ORDERMGMT_CATALOG_API_TOKEN),
+  );
+}
+
+function catalogSkuReadAuthorized(request: Request, env: InternalCatalogEnv): boolean {
+  const token = bearerToken(request);
+  if (!token) return false;
+  return Boolean(
+    (env.INTERNAL_CATALOG_API_TOKEN
+      && tokensEqual(token, env.INTERNAL_CATALOG_API_TOKEN))
+    || (env.ORDERMGMT_CATALOG_API_TOKEN
+      && tokensEqual(token, env.ORDERMGMT_CATALOG_API_TOKEN)),
+  );
+}
+
 export function postgrestIn(values: string[]): string {
   const quoted = values.map((value) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   return `in.(${quoted.join(',')})`;
@@ -546,11 +567,11 @@ export async function handleCatalogSkuRequest(
     return json({ error: 'method_not_allowed' }, 405, { allow: 'GET' });
   }
 
-  if (!configurationReady(env)) {
+  if (!catalogSkuReadConfigurationReady(env)) {
     return json({ error: 'service_not_configured' }, 503);
   }
 
-  if (!authorized(request, env.INTERNAL_CATALOG_API_TOKEN)) {
+  if (!catalogSkuReadAuthorized(request, env)) {
     return json({ error: 'unauthorized' }, 401);
   }
 
