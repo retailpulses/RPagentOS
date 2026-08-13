@@ -11,6 +11,7 @@
     "src/api/internal-catalog-listing-state.test.ts",
     "src/api/internal-catalog-source-imports.test.ts",
     "src/api/internal-catalog-listing-candidates.test.ts",
+    "src/api/internal-catalog-manual-fields.test.ts",
     "functions/api/internal/catalog/**/*.ts"
   ]
 }

@@ -1,6 +1,7 @@
 export interface InternalCatalogEnv {
   INTERNAL_CATALOG_API_TOKEN?: string;
   CATALOGSYNC_PIPELINE_API_TOKEN?: string;
+  ORDERMGMT_CATALOG_API_TOKEN?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
 }
@@ -10,6 +11,18 @@ export interface CatalogSkuResponse {
   source_available_qty: number | null;
   sync_status: string | null;
   last_sync_success_at: string | null;
+  manual_cost_price?: number | null;
+  manual_presale_arrival_date?: string | null;
+  presale_info_protect_until?: string | null;
+  effective_cost_price?: number | null;
+}
+
+export interface CatalogSkuManualFieldsResponse {
+  item_code: string;
+  manual_cost_price: number | null;
+  manual_presale_arrival_date: string | null;
+  presale_info_protect_until: string | null;
+  effective_cost_price: number | null;
 }
 
 export interface CatalogInventoryQueryResponse {
@@ -411,6 +424,26 @@ export function pipelineAuthorized(request: Request, env: InternalCatalogEnv): b
   );
 }
 
+export function ordermgmtCatalogConfigurationReady(
+  env: InternalCatalogEnv,
+): env is InternalCatalogEnv & Required<Pick<InternalCatalogEnv, 'ORDERMGMT_CATALOG_API_TOKEN' | 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>> {
+  return Boolean(env.ORDERMGMT_CATALOG_API_TOKEN && env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+/**
+ * Order-management owner write authorization. Only the dedicated
+ * ORDERMGMT_CATALOG_API_TOKEN is accepted — the internal catalog read token and
+ * the CatalogSync pipeline token never authorize this endpoint.
+ */
+export function ordermgmtCatalogAuthorized(request: Request, env: InternalCatalogEnv): boolean {
+  const token = bearerToken(request);
+  if (!token) return false;
+  return Boolean(
+    env.ORDERMGMT_CATALOG_API_TOKEN
+    && tokensEqual(token, env.ORDERMGMT_CATALOG_API_TOKEN),
+  );
+}
+
 export function postgrestIn(values: string[]): string {
   const quoted = values.map((value) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   return `in.(${quoted.join(',')})`;
@@ -549,7 +582,7 @@ export async function handleCatalogSkuRequest(
       supabaseEnv,
       'product_commercials',
       {
-        select: 'source_available_qty,sync_status,last_sync_success_at',
+        select: 'source_available_qty,sync_status,last_sync_success_at,manual_cost_price,manual_presale_arrival_date,presale_info_protect_until,effective_cost_price',
         variant_id: `eq.${variant.id}`,
         limit: '1',
       },
@@ -564,11 +597,212 @@ export async function handleCatalogSkuRequest(
       sync_status: typeof commercial.sync_status === 'string' ? commercial.sync_status : null,
       last_sync_success_at:
         typeof commercial.last_sync_success_at === 'string' ? commercial.last_sync_success_at : null,
+      manual_cost_price:
+        typeof commercial.manual_cost_price === 'number' ? commercial.manual_cost_price : null,
+      manual_presale_arrival_date:
+        typeof commercial.manual_presale_arrival_date === 'string' ? commercial.manual_presale_arrival_date : null,
+      presale_info_protect_until:
+        typeof commercial.presale_info_protect_until === 'string' ? commercial.presale_info_protect_until : null,
+      effective_cost_price:
+        typeof commercial.effective_cost_price === 'number' ? commercial.effective_cost_price : null,
     };
 
     return json(result);
   } catch (error) {
     console.error('internal catalog SKU read failed', error);
+    return json({ error: 'catalog_upstream_error' }, 502);
+  }
+}
+
+const MANUAL_FIELD_KEYS = new Set([
+  'manual_cost_price',
+  'manual_presale_arrival_date',
+  'presale_info_protect_until',
+]);
+
+const MANUAL_DATE_KEYS = new Set([
+  'manual_presale_arrival_date',
+  'presale_info_protect_until',
+]);
+
+const MAX_MANUAL_COST_PRICE = 99_999_999;
+
+function isRealCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+/**
+ * Owner-side manual field override for a single SKU.
+ *
+ * Order management may override a bounded set of manual commercial fields
+ * without claiming ownership of derived values: `effective_cost_price` remains
+ * computed by the database pricing trigger and is only returned here.
+ *
+ * Authorization is scoped to ORDERMGMT_CATALOG_API_TOKEN only. Audit evidence
+ * is emitted as a structured owner-side event after the exact-row write; no
+ * shared JSON/text field is read-modify-written.
+ */
+export async function handleCatalogSkuManualFieldsUpdate(
+  request: Request,
+  env: InternalCatalogEnv,
+  itemCodeParam: string,
+  fetchFn: FetchLike = fetch,
+): Promise<Response> {
+  if (request.method !== 'PATCH') {
+    return json({ error: 'method_not_allowed' }, 405, { allow: 'PATCH' });
+  }
+
+  if (!ordermgmtCatalogConfigurationReady(env)) {
+    return json({ error: 'service_not_configured' }, 503);
+  }
+
+  if (!ordermgmtCatalogAuthorized(request, env)) {
+    return json({ error: 'unauthorized' }, 401);
+  }
+
+  const itemCode = itemCodeParam.trim();
+  if (!itemCode) return json({ error: 'item_code_required' }, 400);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'invalid_json' }, 400);
+  }
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json({ error: 'invalid_request', message: 'body must be a JSON object' }, 400);
+  }
+
+  const bodyObj = body as Record<string, unknown>;
+  for (const key of Object.keys(bodyObj)) {
+    if (!MANUAL_FIELD_KEYS.has(key)) {
+      return json({ error: 'unknown_field', field: key }, 400);
+    }
+  }
+
+  if (Object.keys(bodyObj).length === 0) {
+    return json({ error: 'no_fields_to_update' }, 400);
+  }
+
+  const patch: Record<string, unknown> = {};
+  const applied: Record<string, unknown> = {};
+
+  if (Object.prototype.hasOwnProperty.call(bodyObj, 'manual_cost_price')) {
+    const costValue = bodyObj.manual_cost_price;
+    if (costValue !== null) {
+      const validCost = typeof costValue === 'number'
+        && Number.isFinite(costValue)
+        && costValue > 0
+        && costValue <= MAX_MANUAL_COST_PRICE;
+      if (!validCost) {
+        return json({ error: 'invalid_manual_cost_price' }, 400);
+      }
+    }
+    patch.manual_cost_price = costValue;
+    applied.manual_cost_price = costValue;
+  }
+
+  for (const dateKey of MANUAL_DATE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(bodyObj, dateKey)) continue;
+    const dateValue = bodyObj[dateKey];
+    if (dateValue !== null && (typeof dateValue !== 'string' || !isRealCalendarDate(dateValue))) {
+      return json({ error: `invalid_${dateKey}` }, 400);
+    }
+    patch[dateKey] = dateValue;
+    applied[dateKey] = dateValue;
+  }
+
+  const supabaseEnv = {
+    SUPABASE_URL: env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+
+  try {
+    const variants = await supabaseRows(
+      supabaseEnv,
+      'product_variants',
+      { select: 'id,item_code', or: postgrestExactIlikeOr([itemCode]), limit: '2' },
+      fetchFn,
+    );
+
+    if (variants.length === 0) return json({ error: 'sku_not_found', item_code: itemCode }, 404);
+    if (variants.length > 1) return json({ error: 'duplicate_item_code', item_code: itemCode }, 409);
+
+    const variant = variants[0] as { id?: unknown; item_code?: unknown };
+    if (typeof variant.id !== 'string' || typeof variant.item_code !== 'string') {
+      throw new Error('Supabase product_variants response is missing required fields');
+    }
+
+    const commercials = await supabaseRows(
+      supabaseEnv,
+      'product_commercials',
+      {
+        select: 'variant_id,manual_cost_price,manual_presale_arrival_date,presale_info_protect_until,effective_cost_price',
+        variant_id: `eq.${variant.id}`,
+        limit: '2',
+      },
+      fetchFn,
+    );
+
+    if (commercials.length === 0) {
+      return json({ error: 'commercial_state_missing', item_code: variant.item_code }, 404);
+    }
+    if (commercials.length > 1) {
+      return json({ error: 'duplicate_commercial_state', item_code: variant.item_code }, 409);
+    }
+
+    const patchUrl = new URL(
+      `/rest/v1/product_commercials?variant_id=eq.${encodeURIComponent(variant.id)}`,
+      supabaseEnv.SUPABASE_URL.replace(/\/$/, ''),
+    );
+    const patchResp = await fetchFn(patchUrl, {
+      method: 'PATCH',
+      headers: {
+        apikey: supabaseEnv.SUPABASE_SERVICE_ROLE_KEY,
+        authorization: `Bearer ${supabaseEnv.SUPABASE_SERVICE_ROLE_KEY}`,
+        'content-type': 'application/json',
+        accept: 'application/json',
+        prefer: 'return=representation',
+      },
+      body: JSON.stringify(patch),
+    });
+    if (!patchResp.ok) {
+      throw new Error(`Supabase product_commercials PATCH failed with HTTP ${patchResp.status}`);
+    }
+
+    const patchedRows: unknown = await patchResp.json();
+    if (!Array.isArray(patchedRows) || patchedRows.length !== 1) {
+      throw new Error('Supabase product_commercials PATCH did not update exactly one row');
+    }
+    const patched = patchedRows[0] as Record<string, unknown>;
+
+    const result: CatalogSkuManualFieldsResponse = {
+      item_code: variant.item_code,
+      manual_cost_price: typeof patched.manual_cost_price === 'number' ? patched.manual_cost_price : null,
+      manual_presale_arrival_date:
+        typeof patched.manual_presale_arrival_date === 'string' ? patched.manual_presale_arrival_date : null,
+      presale_info_protect_until:
+        typeof patched.presale_info_protect_until === 'string' ? patched.presale_info_protect_until : null,
+      effective_cost_price: typeof patched.effective_cost_price === 'number' ? patched.effective_cost_price : null,
+    };
+
+    console.info(JSON.stringify({
+      event: 'ordermgmt_manual_product_overrides_applied',
+      occurred_at: new Date().toISOString(),
+      item_code: variant.item_code,
+      variant_id: variant.id,
+      applied_fields: applied,
+    }));
+
+    return json(result);
+  } catch (error) {
+    console.error('internal catalog manual-fields update failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
   }
 }
