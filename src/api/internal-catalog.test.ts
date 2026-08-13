@@ -4,6 +4,7 @@ import { handleCatalogSkuRequest, type InternalCatalogEnv } from './internal-cat
 
 const env: InternalCatalogEnv = {
   INTERNAL_CATALOG_API_TOKEN: 'catalog-token',
+  ORDERMGMT_CATALOG_API_TOKEN: 'ordermgmt-token',
   SUPABASE_URL: 'https://catalog.test',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role',
 };
@@ -31,6 +32,22 @@ test('returns 404 for an unknown item code', async () => {
   const response = await handleCatalogSkuRequest(
     request(),
     env,
+    'UNKNOWN',
+    async () => Response.json([]),
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'sku_not_found', item_code: 'UNKNOWN' });
+});
+
+test('accepts the dedicated OrderMgmt token for SKU reads', async () => {
+  const response = await handleCatalogSkuRequest(
+    request('ordermgmt-token'),
+    {
+      ORDERMGMT_CATALOG_API_TOKEN: 'ordermgmt-token',
+      SUPABASE_URL: 'https://catalog.test',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+    },
     'UNKNOWN',
     async () => Response.json([]),
   );
