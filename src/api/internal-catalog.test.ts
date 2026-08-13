@@ -52,6 +52,10 @@ test('resolves a lowercase request to canonical item code and preserves zero', a
         source_available_qty: 0,
         sync_status: 'synced',
         last_sync_success_at: '2026-07-15T06:54:00.000Z',
+        manual_cost_price: 1200,
+        manual_presale_arrival_date: '2026-08-20',
+        presale_info_protect_until: '2026-08-18',
+        effective_cost_price: 1200,
       },
     ]);
   });
@@ -62,6 +66,10 @@ test('resolves a lowercase request to canonical item code and preserves zero', a
     source_available_qty: 0,
     sync_status: 'synced',
     last_sync_success_at: '2026-07-15T06:54:00.000Z',
+    manual_cost_price: 1200,
+    manual_presale_arrival_date: '2026-08-20',
+    presale_info_protect_until: '2026-08-18',
+    effective_cost_price: 1200,
   });
   assert.equal(urls.length, 2);
   assert.match(urls[0], /or=%28item_code\.ilike\.%22n511p407695w%22%29/);
@@ -83,6 +91,10 @@ test('returns null fields when a variant has no commercial row', async () => {
     source_available_qty: null,
     sync_status: null,
     last_sync_success_at: null,
+    manual_cost_price: null,
+    manual_presale_arrival_date: null,
+    presale_info_protect_until: null,
+    effective_cost_price: null,
   });
 });
 

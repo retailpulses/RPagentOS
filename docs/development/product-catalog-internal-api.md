@@ -21,13 +21,18 @@ Successful response (`200`):
   "item_code": "N511P407695W",
   "source_available_qty": 0,
   "sync_status": "synced",
-  "last_sync_success_at": "2026-07-15T06:54:00.000Z"
+  "last_sync_success_at": "2026-07-15T06:54:00.000Z",
+  "manual_cost_price": 2000,
+  "manual_presale_arrival_date": "2026-08-20",
+  "presale_info_protect_until": "2026-08-19",
+  "effective_cost_price": 2000
 }
 ```
 
-Quantity `0` is a known zero and is never replaced by `null`. If the SKU exists
-but has no `product_commercials` row, the three commercial/sync fields are
-`null`; consumers must fail closed on that unknown state. The endpoint returns:
+Quantity `0` is a known zero and is never replaced by `null`. Manual override
+and effective-cost fields support the OrderMgmt operator portal. If the SKU
+exists but has no `product_commercials` row, all commercial fields are `null`;
+consumers must fail closed on that unknown state. The endpoint returns:
 
 - `400 item_code_required` for an empty path parameter
 - `401 unauthorized` for missing or invalid bearer authentication
@@ -43,6 +48,8 @@ Set these only as Cloudflare server-side secrets/variables:
 - `INTERNAL_CATALOG_API_TOKEN`
 - `CATALOGSYNC_PIPELINE_API_TOKEN` (scoped credential for the three listing
   pipeline endpoints; existing internal API clients remain valid)
+- `ORDERMGMT_CATALOG_API_TOKEN` (scoped credential for the order-management
+  manual-field write endpoint)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
@@ -441,6 +448,74 @@ Per-row errors: `sku_not_found`, `duplicate_item_code`,
 - 502 — upstream/PostgREST failure
 - 503 — service not configured
 
+## Update manual fields for one SKU (order-management owner write)
+
+`PATCH /api/internal/catalog/sku/:item_code/manual-fields`
+
+This endpoint is the order-management owner write for a bounded set of manual
+commercial fields. It is authenticated with a dedicated token and never accepts
+the internal catalog read token or the CatalogSync pipeline token.
+
+Authentication:
+
+```http
+Authorization: Bearer <ORDERMGMT_CATALOG_API_TOKEN>
+```
+
+Request body — a JSON object containing at least one of these optional keys
+(unknown keys are rejected):
+
+```json
+{
+  "manual_cost_price": 2000,
+  "manual_presale_arrival_date": "2026-08-20",
+  "presale_info_protect_until": null
+}
+```
+
+Field rules:
+
+- `manual_cost_price` — a finite number strictly greater than `0` and at most
+  `99,999,999`, or `null` to clear. `0`, negatives, and non-finite values are
+  rejected outright (never coerced to `null`).
+- `manual_presale_arrival_date` and `presale_info_protect_until` — real
+  `YYYY-MM-DD` calendar dates or `null` to clear.
+
+Successful response (`200`) returns the stored manual fields and the derived
+`effective_cost_price`. The endpoint never writes `effective_cost_price` — it
+remains owned by the database pricing trigger, which recomputes it from the
+manual override:
+
+```json
+{
+  "item_code": "N511P407695W",
+  "manual_cost_price": 2000,
+  "manual_presale_arrival_date": "2026-08-20",
+  "presale_info_protect_until": null,
+  "effective_cost_price": 2000
+}
+```
+
+The variant is resolved case-insensitively by `item_code`; the write targets
+exactly one `product_commercials` row. The owner emits structured audit evidence
+after a successful exact-row update. It does not read-modify-write shared
+`raw_payload` or `audit_notes`, avoiding lost updates with catalog sync writers.
+
+Error responses:
+
+- `400` — invalid JSON, unknown field, no fields to update, or an invalid
+  field value (`invalid_manual_cost_price`, `invalid_manual_presale_arrival_date`,
+  `invalid_presale_info_protect_until`)
+- `401 unauthorized` — missing/invalid bearer token (internal-catalog and
+  pipeline tokens are not accepted)
+- `404 sku_not_found` / `commercial_state_missing` — no canonical variant or
+  no commercial row
+- `409 duplicate_item_code` / `duplicate_commercial_state` — ambiguous identity
+- `405 method_not_allowed` — non-PATCH
+- `502 catalog_upstream_error` — upstream failure (generic)
+- `503 service_not_configured` — `ORDERMGMT_CATALOG_API_TOKEN` or Supabase
+  secrets absent
+
 ## Verification
 
 Run `npm run test:internal-api`, `npm run typecheck:internal-api`, and
@@ -450,4 +525,5 @@ zero preservation, absent or not-ready commercial state, duplicate identity,
 unknown quantities, upstream errors, method handling, listing-state validation,
 status transitions, conflict detection, idempotent retry, raw payload
 preservation, source import validation and idempotency, listing candidate
-query with Mercari mappings, and both table writes.
+query with Mercari mappings, manual-field override validation and audit, and
+both table writes.

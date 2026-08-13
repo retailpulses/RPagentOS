@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test:supabase": "tsx --env-file=.env.local src/test-supabase.ts",
-    "test:internal-api": "tsx --test src/api/internal-catalog.test.ts src/api/internal-catalog-batch.test.ts src/api/internal-catalog-listing-state.test.ts src/api/internal-catalog-source-imports.test.ts src/api/internal-catalog-listing-candidates.test.ts",
+    "test:internal-api": "tsx --test src/api/internal-catalog.test.ts src/api/internal-catalog-batch.test.ts src/api/internal-catalog-listing-state.test.ts src/api/internal-catalog-source-imports.test.ts src/api/internal-catalog-listing-candidates.test.ts src/api/internal-catalog-manual-fields.test.ts",
     "typecheck:internal-api": "tsc --noEmit --project tsconfig.internal-api.json",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
