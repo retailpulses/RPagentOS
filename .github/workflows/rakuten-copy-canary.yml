@@ -1,54 +1,78 @@
-name: Rakuten Copy Improvement Canary
+name: Rakuten DeepSeek Copy Live Loop
 
 on:
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
-      listing_id:
-        description: "Optional Rakuten platform_listings UUID; blank selects the newest draft/enhanced Rakuten listing"
-        required: false
-        default: ""
-      shop_code:
-        description: "Optional exact Rakuten shop code"
-        required: false
-        default: ""
+      mode:
+        description: "dry_run only evaluates; auto may update one safe canonical listing"
+        required: true
+        type: choice
+        options: [dry_run, auto]
+        default: dry_run
+      limit:
+        description: "Bounded batch size (1-5)"
+        required: true
+        default: "1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: rakuten-copy-improvement-manual-canary
+  group: rakuten-deepseek-copy-live-loop
   cancel-in-progress: false
 
 jobs:
-  dry-run:
-    name: One-listing production dry run
+  run-loop:
+    name: Select, enrich, safety-check, and optionally apply
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-      LISTING_ID: ${{ inputs.listing_id }}
-      SHOP_CODE: ${{ inputs.shop_code }}
-      LISTING_QWEN_MODEL: qwen3.5:4b
-      LISTING_QWEN_TIMEOUT_MS: "600000"
-      COPY_APPLY_MODE: dry_run
-      COPY_IMPROVEMENT_ENABLED: "false"
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      INTERNAL_CATALOG_API_URL: https://rpagentos.pages.dev/api/internal/catalog
+      INTERNAL_CATALOG_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
+      COPY_IMPROVEMENT_AUTO_SHOPS: ${{ vars.RAKUTEN_COPY_AUTO_SHOPS }}
+      COPY_IMPROVEMENT_ENABLED: "true"
+      COPY_LIVE_MIN_OPPORTUNITY_SCORE: "35"
+      COPY_LIVE_CONFIDENCE_THRESHOLD: "0.90"
+      COPY_LIVE_MIN_COMMERCIAL_DELTA: "10"
+      COPY_LIVE_COOLDOWN_DAYS: "7"
+      LISTING_COPY_MODEL: deepseek-chat
+      LISTING_DEEPSEEK_TIMEOUT_MS: "120000"
+      LISTING_DEEPSEEK_MAX_TOKENS: "1800"
 
     steps:
       - name: Checkout released source
         uses: actions/checkout@v4
 
-      - name: Validate bounded inputs
+      - name: Resolve bounded run settings
         shell: bash
         run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            mode=auto
+            limit=1
+          else
+            mode="${{ inputs.mode }}"
+            limit="${{ inputs.limit }}"
+          fi
+          if [[ "$mode" != "dry_run" && "$mode" != "auto" ]]; then
+            echo "mode must be dry_run or auto"
+            exit 1
+          fi
+          if ! [[ "$limit" =~ ^[1-5]$ ]]; then
+            echo "limit must be between 1 and 5"
+            exit 1
+          fi
           test -n "$SUPABASE_PROJECT_REF"
-          if [[ -n "$LISTING_ID" ]] && ! [[ "$LISTING_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
-            echo "listing_id must be a UUID"
-            exit 1
+          test -n "$DEEPSEEK_API_KEY"
+          if [[ "$mode" == "auto" ]]; then
+            test -n "$INTERNAL_CATALOG_API_TOKEN"
+            test -n "$COPY_IMPROVEMENT_AUTO_SHOPS"
           fi
-          if [[ -n "$SHOP_CODE" ]] && ! [[ "$SHOP_CODE" =~ ^[A-Za-z0-9_-]{1,80}$ ]]; then
-            echo "shop_code contains unsupported characters"
-            exit 1
-          fi
+          echo "LOOP_MODE=$mode" >> "$GITHUB_ENV"
+          echo "LOOP_LIMIT=$limit" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -63,20 +87,6 @@ jobs:
         uses: supabase/setup-cli@v1
         with:
           version: 2.109.1
-
-      - name: Start local Ollama and pull Qwen
-        shell: bash
-        run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 &
-          for attempt in {1..20}; do
-            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-          ollama pull "$LISTING_QWEN_MODEL"
 
       - name: Resolve ephemeral server-side database access
         shell: bash
@@ -94,21 +104,10 @@ jobs:
           echo "SUPABASE_URL=https://${SUPABASE_PROJECT_REF}.supabase.co" >> "$GITHUB_ENV"
           echo "SUPABASE_SERVICE_ROLE_KEY=$service_role_key" >> "$GITHUB_ENV"
 
-      - name: Run one-listing Rakuten proposal canary
+      - name: Run bounded DeepSeek copy loop
         shell: bash
         run: |
-          selected_listing_id="$LISTING_ID"
-          if [[ -z "$selected_listing_id" ]]; then
-            selected_listing_id="$(curl -fsS --get "$SUPABASE_URL/rest/v1/platform_listings" \
-              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-              --data-urlencode "select=id" \
-              --data-urlencode "platform=eq.rakuten" \
-              --data-urlencode "lifecycle_stage=in.(draft,enhanced)" \
-              --data-urlencode "order=updated_at.desc" \
-              --data-urlencode "limit=1" | jq -r '.[0].id // empty')"
-          fi
-          test -n "$selected_listing_id"
-          args=(--mode=dry_run --platform=rakuten --limit=1 "--listing-id=$selected_listing_id")
-          if [[ -n "$SHOP_CODE" ]]; then args+=("--shop-code=$SHOP_CODE"); fi
-          npx tsx src/jobs/improve-listing-copy.ts "${args[@]}"
+          npx tsx src/jobs/run-generic-copy-canary.ts \
+            "--mode=$LOOP_MODE" \
+            "--limit=$LOOP_LIMIT" \
+            --compact

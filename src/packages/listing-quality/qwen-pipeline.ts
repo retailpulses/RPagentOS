@@ -16,7 +16,7 @@ import type {
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const DEFAULT_OLLAMA_URL = process.env['OLLAMA_BASE_URL'] ?? 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = process.env['LISTING_QWEN_MODEL'] ?? 'qwen3.5:9b';
+const DEFAULT_MODEL = process.env['LISTING_IMAGE_MODEL'] ?? process.env['LISTING_QWEN_MODEL'] ?? 'qwen3.5:9b';
 const DEFAULT_TIMEOUT_MS = 120_000; // 120 seconds
 
 // ─── Ollama API helpers ──────────────────────────────────────────────────────
@@ -261,7 +261,7 @@ function buildVisualReviewPrompt(input: QwenPipelineInput): string {
  *
  * Default timeout is 120 seconds. Configure via environment variables:
  *   OLLAMA_BASE_URL       — default http://127.0.0.1:11434
- *   LISTING_QWEN_MODEL    — default qwen3.5:9b
+ *   LISTING_IMAGE_MODEL   — default qwen3.5:9b (legacy fallback: LISTING_QWEN_MODEL)
  */
 export async function runQwenVisualReview(
   input: QwenPipelineInput,

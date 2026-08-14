@@ -41,7 +41,9 @@
     "job:quality:apply-qwen": "tsx --env-file=.env.cloud.local src/jobs/apply-qwen-findings.ts",
     "job:listing:improve-copy": "tsx --env-file=.env.local src/jobs/improve-listing-copy.ts",
     "job:listing:improve-copy:cloud": "tsx --env-file=.env.cloud.local src/jobs/improve-listing-copy.ts",
-    "test:copy": "tsx --test src/packages/listing-copy/improve-copy.test.ts",
+    "test:copy": "tsx --test src/packages/listing-copy/*.test.ts",
+    "job:listing:capture-copy-benchmark": "tsx src/jobs/capture-rakuten-copy-benchmark.ts",
+    "job:listing:generic-copy-canary": "tsx src/jobs/run-generic-copy-canary.ts",
     "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],
