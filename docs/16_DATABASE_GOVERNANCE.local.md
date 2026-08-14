@@ -219,6 +219,7 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 - **Kill switch:** set `COPY_IMPROVEMENT_ENABLED` to any value other than exact `true`, disable `.github/workflows/rakuten-copy-canary.yml`, or clear the shop allowlist
 - **Credential class:** server-side service role for bounded reads/audit plus dedicated internal API bearer token for revision-checked writes
 - **Rollback:** disable the workflow; restore an affected listing through the existing revisioned catalog lifecycle path using its prior audit snapshot
+- **Reporting:** every scheduled or manual job sends a bounded summary and listing title/description diff to the configured WeCom webhook; the URL is stored only as a GitHub Secret
 - **Approval:** Retailpulses owner requested a live DeepSeek loop on 2026-08-14
 - **Issue:** `retailpulses/RPagentOS#64`
 - **Registry:** `retailpulses/rp-governance-kit` `docs/DATABASE_WORKLOADS.yaml#rakuten_deepseek_copy_live_loop`
