@@ -210,7 +210,7 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 - **Workload ID:** `rakuten_deepseek_copy_live_loop`
 - **Category:** scheduled_jobs
 - **Risk level:** medium
-- **Trigger:** `17 */6 * * *` UTC and bounded manual dispatch
+- **Trigger:** `17 */2 * * *` UTC and bounded manual dispatch
 - **Access path:** PostgREST reads/audit rows plus revision-checked `internal_api` canonical writes
 - **Bounds:** one listing per scheduled invocation, five maximum for manual runs, concurrency one
 - **Selection:** deterministic opportunity score; `giga_generated` Rakuten drafts/enhanced only; hero, recently reviewed, evidence-poor, and strong-copy listings excluded

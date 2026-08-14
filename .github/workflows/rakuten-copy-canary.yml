@@ -2,7 +2,7 @@ name: Rakuten DeepSeek Copy Live Loop
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */2 * * *"
   workflow_dispatch:
     inputs:
       mode:
