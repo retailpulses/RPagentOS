@@ -205,6 +205,24 @@ before running `--apply`.
 
 Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp-governance-kit §6.
 
+## Rakuten DeepSeek Copy Improvement Workload
+
+- **Workload ID:** `rakuten_deepseek_copy_live_loop`
+- **Category:** scheduled_jobs
+- **Risk level:** medium
+- **Trigger:** `17 */6 * * *` UTC and bounded manual dispatch
+- **Access path:** PostgREST reads/audit rows plus revision-checked `internal_api` canonical writes
+- **Bounds:** one listing per scheduled invocation, five maximum for manual runs, concurrency one
+- **Selection:** deterministic opportunity score; `giga_generated` Rakuten drafts/enhanced only; hero, recently reviewed, evidence-poor, and strong-copy listings excluded
+- **Auto gate:** DeepSeek evidence audit passes, no specification conflict, original content preserved, deterministic weakness exists, commercial delta >= 10, confidence >= 0.90, shop allowlisted
+- **Operator approval:** optional; exceptions are skipped and audited, never held as a default gate
+- **Kill switch:** set `COPY_IMPROVEMENT_ENABLED` to any value other than exact `true`, disable `.github/workflows/rakuten-copy-canary.yml`, or clear the shop allowlist
+- **Credential class:** server-side service role for bounded reads/audit plus dedicated internal API bearer token for revision-checked writes
+- **Rollback:** disable the workflow; restore an affected listing through the existing revisioned catalog lifecycle path using its prior audit snapshot
+- **Approval:** Retailpulses owner requested a live DeepSeek loop on 2026-08-14
+- **Issue:** `retailpulses/RPagentOS#64`
+- **Registry:** `retailpulses/rp-governance-kit` `docs/DATABASE_WORKLOADS.yaml#rakuten_deepseek_copy_live_loop`
+
 ## Database Environment Model
 
 **Shared.** Multiple repositories connect to one hosted Supabase project. Production and staging are not yet separated (documented technical debt).

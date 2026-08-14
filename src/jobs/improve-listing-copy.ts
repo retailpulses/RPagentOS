@@ -2,7 +2,9 @@ import { supabase } from '../lib/supabase.js';
 import { runReReview } from '../packages/listing-quality/review-runner.js';
 import {
   type CopyMode,
+  type CopyBenchmark,
   type CopyImproveConfig,
+  type ListingClaimPack,
   type CopyProposal,
   type CopyProposalResult,
   type FinalizationSummary,
@@ -21,8 +23,25 @@ import {
   validateConfigForMode,
   validateProposal,
 } from '../packages/listing-copy/improve-copy.js';
+import { evaluateAgainstBenchmark } from '../packages/listing-copy/benchmark.js';
+import {
+  activateBenchmarkSet,
+  captureRakutenBenchmark,
+  extractSuitcaseSizes,
+  persistBenchmarkSet,
+  type BenchmarkCaptureResult,
+} from '../packages/listing-copy/benchmark-capture.js';
+import {
+  assessBenchmarkCandidates,
+  identifyBenchmarkScope,
+  isBenchmarkReusable,
+  type BenchmarkScope,
+} from '../packages/listing-copy/benchmark-identification.js';
+import { buildListingClaimPack } from '../packages/listing-copy/claim-pack.js';
 
 const MAX_SELECTION_SCAN = 100;
+const DEFAULT_BENCHMARK_TTL_DAYS = 30;
+const DEFAULT_BENCHMARK_CAPTURE_DELAY_MS = 1_000;
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -38,6 +57,20 @@ function hasFlag(name: string): boolean {
 
 function nonNullRecord(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+}
+
+function groundedNumericTokens(variant: Record<string, unknown> | undefined): string[] {
+  if (!variant) return [];
+  const tokens: string[] = [];
+  for (const [field, unit] of [
+    ['product_weight_kg', 'kg'], ['package_weight_kg', 'kg'],
+    ['package_width_cm', 'cm'], ['package_height_cm', 'cm'], ['package_length_cm', 'cm'],
+    ['package_quantity', '個'],
+  ] as const) {
+    const value = variant[field];
+    if (typeof value === 'number' && Number.isFinite(value)) tokens.push(`${value}${unit}`);
+  }
+  return tokens;
 }
 
 function isWeakCopy(listing: Pick<ListingRow, 'title' | 'description'>): boolean {
@@ -61,7 +94,7 @@ async function fetchRakutenListings(options: {
   let rowsRead = 0;
   let query = supabase
     .from('platform_listings')
-    .select('id,platform,shop_code,title,description,variant_id,product_spu_id,product_family_id,content_revision')
+    .select('id,platform,shop_code,title,description,variant_id,product_spu_id,product_family_id,category_id,category_name,content_revision')
     .eq('platform', 'rakuten')
     .in('lifecycle_stage', ['draft', 'enhanced'])
     .order('updated_at', { ascending: false })
@@ -74,7 +107,7 @@ async function fetchRakutenListings(options: {
   if (error) throw new Error(`Fetch Rakuten listings: ${error.message}`);
   const rawListings = (data ?? []) as Array<Record<string, unknown>>;
   rowsRead += rawListings.length;
-  const selected = rawListings
+  const selected: ListingRow[] = rawListings
     .map((row) => ({
       id: String(row.id),
       platform: String(row.platform),
@@ -84,6 +117,8 @@ async function fetchRakutenListings(options: {
       variant_id: typeof row.variant_id === 'string' ? row.variant_id : null,
       product_spu_id: typeof row.product_spu_id === 'string' ? row.product_spu_id : null,
       product_family_id: typeof row.product_family_id === 'string' ? row.product_family_id : null,
+      category_id: typeof row.category_id === 'string' ? row.category_id : null,
+      category_name: typeof row.category_name === 'string' ? row.category_name : null,
       content_revision: typeof row.content_revision === 'number' ? row.content_revision : 1,
       is_hero: false,
       trusted_facts: {},
@@ -93,17 +128,46 @@ async function fetchRakutenListings(options: {
 
   if (selected.length === 0) return { listings: [], requests, rowsRead };
 
+  const listingIds = selected.map((row) => row.id);
+
+  const linksResult = await supabase.from('product_platform_links')
+    .select('listing_id,variant_id,product_spu_id,product_family_id,confidence')
+    .in('listing_id', listingIds)
+    .order('confidence', { ascending: false, nullsFirst: false });
+  requests++;
+  if (linksResult.error) throw new Error(`Fetch product-platform links: ${linksResult.error.message}`);
+  rowsRead += linksResult.data?.length ?? 0;
+  const linksByListing = new Map<string, Array<Record<string, unknown>>>();
+  for (const link of linksResult.data ?? []) {
+    const listingId = String(link.listing_id);
+    const current = linksByListing.get(listingId) ?? [];
+    current.push(link as Record<string, unknown>);
+    linksByListing.set(listingId, current);
+  }
+  for (const listing of selected) {
+    const links = linksByListing.get(listing.id) ?? [];
+    const variantIdsForListing = [...new Set(links.flatMap((link) => typeof link.variant_id === 'string' ? [link.variant_id] : []))];
+    const spuIdsForListing = [...new Set(links.flatMap((link) => typeof link.product_spu_id === 'string' ? [link.product_spu_id] : []))];
+    const familyIdsForListing = [...new Set(links.flatMap((link) => typeof link.product_family_id === 'string' ? [link.product_family_id] : []))];
+    if (variantIdsForListing.length === 1) listing.variant_id ??= variantIdsForListing[0] ?? null;
+    if (spuIdsForListing.length === 1) listing.product_spu_id ??= spuIdsForListing[0] ?? null;
+    if (familyIdsForListing.length === 1) listing.product_family_id ??= familyIdsForListing[0] ?? null;
+  }
+
   const variantIds = selected.flatMap((row) => row.variant_id ? [row.variant_id] : []);
   const spuIds = selected.flatMap((row) => row.product_spu_id ? [row.product_spu_id] : []);
   const familyIds = selected.flatMap((row) => row.product_family_id ? [row.product_family_id] : []);
-  const listingIds = selected.map((row) => row.id);
 
-  const [variantsResult, spusResult, familiesResult, attributesResult, heroResult] = await Promise.all([
+  const [variantsResult, spuVariantsResult, spusResult, familiesResult, attributesResult, heroResult] = await Promise.all([
     variantIds.length ? supabase.from('product_variants')
       .select('id,item_code,variant_name,color,size_text,material,material_ja,country_of_origin_ja,assembly_status,package_width_cm,package_height_cm,package_length_cm,package_weight_kg,product_weight_kg,package_quantity')
       .in('id', variantIds) : Promise.resolve({ data: [], error: null }),
+    spuIds.length ? supabase.from('product_variants')
+      .select('id,product_spu_id,item_code,variant_name,color,size_text,product_weight_kg,package_quantity,country_of_origin_ja,assembly_status')
+      .in('product_spu_id', spuIds)
+      .limit(2000) : Promise.resolve({ data: [], error: null }),
     spuIds.length ? supabase.from('product_spus')
-      .select('id,title,manufacturer_model,category')
+      .select('id,spu_code,title,manufacturer_model,category')
       .in('id', spuIds) : Promise.resolve({ data: [], error: null }),
     familyIds.length ? supabase.from('product_families')
       .select('id,family_name,category,brand_name')
@@ -118,9 +182,10 @@ async function fetchRakutenListings(options: {
       .eq('focus_type', 'hero')
       .eq('status', 'active') : Promise.resolve({ data: [], error: null }),
   ]);
-  requests += 5;
+  requests += 6;
   for (const [label, result] of [
-    ['variants', variantsResult], ['SPUs', spusResult], ['families', familiesResult],
+    ['variants', variantsResult], ['SPU variants', spuVariantsResult],
+    ['SPUs', spusResult], ['families', familiesResult],
     ['attributes', attributesResult], ['hero flags', heroResult],
   ] as const) {
     if (result.error) throw new Error(`Fetch ${label}: ${result.error.message}`);
@@ -131,9 +196,18 @@ async function fetchRakutenListings(options: {
   const spus = new Map((spusResult.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
   const families = new Map((familiesResult.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
   const heroSpus = new Set((heroResult.data ?? []).map((row: Record<string, unknown>) => String(row.product_spu_id)));
+  const variantsBySpu = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of spuVariantsResult.data ?? []) {
+    const record = row as Record<string, unknown>;
+    const key = String(record.product_spu_id);
+    const current = variantsBySpu.get(key) ?? [];
+    current.push(record);
+    variantsBySpu.set(key, current);
+  }
   const attributesByListing = new Map<string, Array<Record<string, unknown>>>();
   for (const row of attributesResult.data ?? []) {
     const record = row as Record<string, unknown>;
+    if (record.attribute_value === null || record.attribute_value === undefined || record.attribute_value === '') continue;
     const key = String(record.listing_id);
     const current = attributesByListing.get(key) ?? [];
     current.push(nonNullRecord({
@@ -146,14 +220,307 @@ async function fetchRakutenListings(options: {
 
   for (const listing of selected) {
     listing.is_hero = listing.product_spu_id ? heroSpus.has(listing.product_spu_id) : false;
+    const spu = listing.product_spu_id ? spus.get(listing.product_spu_id) : undefined;
+    const spuVariants = listing.product_spu_id ? variantsBySpu.get(listing.product_spu_id) ?? [] : [];
+    const assortmentSizes = [...new Set([
+      ...(typeof spu?.title === 'string' ? extractSuitcaseSizes(spu.title) : []),
+      ...spuVariants.flatMap((variant) => typeof variant.variant_name === 'string'
+        ? extractSuitcaseSizes(variant.variant_name) : []),
+    ])];
+    const selectedVariant = listing.variant_id ? variants.get(listing.variant_id) : undefined;
+    listing.verified_claim_pack = buildListingClaimPack({
+      productSpu: spu,
+      selectedVariant,
+      spuVariants,
+      assortmentSizes,
+      childCount: spuVariants.length,
+    });
     listing.trusted_facts = nonNullRecord({
-      variant: listing.variant_id ? variants.get(listing.variant_id) ?? null : null,
-      product: listing.product_spu_id ? spus.get(listing.product_spu_id) ?? null : null,
+      variant: selectedVariant ?? null,
+      product: spu ?? null,
       family: listing.product_family_id ? families.get(listing.product_family_id) ?? null : null,
+      assortment: listing.product_spu_id ? {
+        parent_spu_id: listing.product_spu_id,
+        strategy: assortmentSizes.length >= 2 ? 'multi_size' : assortmentSizes.length === 1
+          ? 'single_size' : 'unknown',
+        sizes: assortmentSizes,
+        child_variant_count: spuVariants.length,
+        children: spuVariants.map((variant) => nonNullRecord({
+          item_code: variant.item_code,
+          color: variant.color,
+          size_text: variant.size_text,
+        })),
+      } : null,
+      grounded_numeric_tokens: groundedNumericTokens(selectedVariant),
       attributes: attributesByListing.get(listing.id) ?? [],
     });
+    const family = listing.product_family_id ? families.get(listing.product_family_id) : undefined;
+    listing.category_name = listing.category_name ??
+      (typeof spu?.category === 'string' ? spu.category : null) ??
+      (typeof family?.category === 'string' ? family.category : null);
   }
   return { listings: selected, requests, rowsRead };
+}
+
+interface BenchmarkResolution {
+  byListingId: Map<string, CopyBenchmark>;
+  requests: number;
+  rowsRead: number;
+  reused: number;
+  stale: number;
+  identified: number;
+  identificationFailed: number;
+  externalRequests: number;
+  rowsWritten: number;
+}
+
+function benchmarkFromRows(
+  set: Record<string, unknown>,
+  items: Array<Record<string, unknown>>,
+): CopyBenchmark {
+  const profile = set.target_profile_json && typeof set.target_profile_json === 'object'
+    ? set.target_profile_json as Record<string, unknown>
+    : {};
+  const topics = Array.isArray(profile.description_topics) ? profile.description_topics : [];
+  const assortment = profile.assortment && typeof profile.assortment === 'object'
+    ? profile.assortment as Record<string, unknown>
+    : {};
+  return {
+    id: String(set.id),
+    marketplace: String(set.marketplace),
+    categoryId: typeof set.category_id === 'string' ? set.category_id : null,
+    categoryName: typeof set.category_name === 'string' ? set.category_name : null,
+    scopeKey: String(set.scope_key),
+    selectionMode: set.selection_mode === 'operator' ? 'operator' : 'automatic',
+    version: Number(set.version),
+    sourceKind: String(set.source_kind),
+    capturedAt: String(set.captured_at),
+    titleTerms: Array.isArray(profile.title_terms)
+      ? profile.title_terms.filter((term): term is string => typeof term === 'string')
+      : [],
+    descriptionTopics: topics.flatMap((topic) => {
+      if (!topic || typeof topic !== 'object') return [];
+      const value = topic as Record<string, unknown>;
+      if (typeof value.name !== 'string' || !Array.isArray(value.terms)) return [];
+      return [{
+        name: value.name,
+        terms: value.terms.filter((term): term is string => typeof term === 'string'),
+      }];
+    }),
+    assortment: {
+      strategy: assortment.strategy === 'multi_size' ? 'multi_size'
+        : assortment.strategy === 'single_size' ? 'single_size' : 'unknown',
+      observedSizes: Array.isArray(assortment.observedSizes)
+        ? assortment.observedSizes.filter((size): size is string => typeof size === 'string') : [],
+      multiSizeListingCount: typeof assortment.multiSizeListingCount === 'number'
+        ? assortment.multiSizeListingCount : 0,
+      multiSizeListingRatio: typeof assortment.multiSizeListingRatio === 'number'
+        ? assortment.multiSizeListingRatio : 0,
+    },
+    items: items.map((item) => ({
+      externalListingId: String(item.external_listing_id),
+      rankPosition: typeof item.rank_position === 'number' ? item.rank_position : null,
+      title: String(item.title),
+      description: typeof item.description === 'string' ? item.description : null,
+      isSponsored: item.is_sponsored === true,
+    })),
+  };
+}
+
+async function fetchActiveBenchmarks(
+  listings: ListingRow[],
+  scopes: Map<string, BenchmarkScope>,
+  explicitBenchmarkSetId?: string,
+): Promise<BenchmarkResolution> {
+  const result: BenchmarkResolution = {
+    byListingId: new Map(), requests: 0, rowsRead: 0, reused: 0, stale: 0,
+    identified: 0, identificationFailed: 0, externalRequests: 0, rowsWritten: 0,
+  };
+  if (listings.length === 0) return result;
+
+  const setRows: Array<Record<string, unknown>> = [];
+  if (explicitBenchmarkSetId) {
+    const { data, error } = await supabase.from('listing_copy_benchmark_sets')
+      .select('*').eq('id', explicitBenchmarkSetId).eq('status', 'active').limit(1);
+    result.requests++;
+    if (error) throw new Error(`Fetch designated copy benchmark: ${error.message}`);
+    setRows.push(...(data ?? []) as Array<Record<string, unknown>>);
+  } else {
+    const scopeKeys = [...new Set([...scopes.values()].map((scope) => scope.scopeKey))];
+    if (scopeKeys.length > 0) {
+      const response = await supabase.from('listing_copy_benchmark_sets')
+        .select('*').eq('marketplace', 'rakuten').eq('status', 'active').in('scope_key', scopeKeys);
+      result.requests++;
+      if (response.error) throw new Error(`Fetch active copy benchmarks: ${response.error.message}`);
+      setRows.push(...(response.data ?? []) as Array<Record<string, unknown>>);
+    }
+  }
+  const uniqueSets = [...new Map(setRows.map((row) => [String(row.id), row])).values()];
+  result.rowsRead += uniqueSets.length;
+  if (explicitBenchmarkSetId && uniqueSets.length === 0) {
+    throw new Error(`Active designated copy benchmark not found: ${explicitBenchmarkSetId}`);
+  }
+  if (uniqueSets.length === 0) return result;
+
+  const ttlDays = Number(process.env['COPY_BENCHMARK_TTL_DAYS'] ?? DEFAULT_BENCHMARK_TTL_DAYS);
+  if (!Number.isFinite(ttlDays) || ttlDays <= 0) throw new Error('COPY_BENCHMARK_TTL_DAYS must be a positive number');
+  const reusableSets = explicitBenchmarkSetId
+    ? uniqueSets
+    : uniqueSets.filter((set) => isBenchmarkReusable(
+      String(set.captured_at),
+      set.selection_mode === 'operator' ? 'operator' : 'automatic',
+      ttlDays,
+    ));
+  if (reusableSets.length === 0) {
+    for (const listing of listings) {
+      const scope = scopes.get(listing.id);
+      if (scope && uniqueSets.some((set) => String(set.scope_key) === scope.scopeKey)) result.stale++;
+    }
+    return result;
+  }
+
+  const { data: itemData, error: itemError } = await supabase.from('listing_copy_benchmark_items')
+    .select('benchmark_set_id,external_listing_id,rank_position,title,description,is_sponsored')
+    .in('benchmark_set_id', reusableSets.map((row) => String(row.id)))
+    .eq('is_sponsored', false)
+    .order('rank_position', { ascending: true });
+  result.requests++;
+  if (itemError) throw new Error(`Fetch copy benchmark items: ${itemError.message}`);
+  const itemRows = (itemData ?? []) as Array<Record<string, unknown>>;
+  result.rowsRead += itemRows.length;
+  const benchmarks = reusableSets.map((set) => benchmarkFromRows(
+    set,
+    itemRows.filter((item) => String(item.benchmark_set_id) === String(set.id)),
+  ));
+
+  for (const listing of listings) {
+    if (explicitBenchmarkSetId) {
+      const benchmark = benchmarks[0];
+      if (benchmark) result.byListingId.set(listing.id, benchmark);
+      continue;
+    }
+    const scope = scopes.get(listing.id);
+    if (!scope) continue;
+    const benchmark = benchmarks.find((candidate) => candidate.marketplace === listing.platform &&
+      candidate.scopeKey === scope.scopeKey &&
+      (candidate.categoryId
+        ? candidate.categoryId === scope.categoryId
+        : candidate.categoryName === scope.categoryName));
+    if (benchmark) {
+      result.byListingId.set(listing.id, benchmark);
+    } else if (uniqueSets.some((set) => String(set.scope_key) === scope.scopeKey)) {
+      result.stale++;
+    }
+  }
+  result.reused = result.byListingId.size;
+  return result;
+}
+
+function benchmarkFromCapture(
+  setId: string,
+  version: number,
+  capture: BenchmarkCaptureResult,
+): CopyBenchmark {
+  return {
+    id: setId,
+    marketplace: capture.marketplace,
+    categoryId: capture.categoryId,
+    categoryName: capture.categoryName,
+    scopeKey: capture.scopeKey,
+    selectionMode: 'automatic',
+    version,
+    sourceKind: capture.sourceKind,
+    capturedAt: capture.capturedAt,
+    titleTerms: capture.targetProfile.titleTerms,
+    descriptionTopics: capture.targetProfile.descriptionTopics.map((topic) => ({ ...topic })),
+    assortment: capture.targetProfile.assortment,
+    items: capture.items.map((item) => ({
+      externalListingId: item.externalListingId,
+      rankPosition: item.rankPosition,
+      title: item.title,
+      description: null,
+      isSponsored: item.isSponsored,
+    })),
+  };
+}
+
+async function resolveOrIdentifyBenchmarks(
+  listings: ListingRow[],
+  explicitBenchmarkSetId?: string,
+): Promise<BenchmarkResolution> {
+  const scopes = new Map<string, BenchmarkScope>();
+  for (const listing of listings) {
+    const scope = identifyBenchmarkScope(listing);
+    if (scope) scopes.set(listing.id, scope);
+  }
+  const result = await fetchActiveBenchmarks(listings, scopes, explicitBenchmarkSetId);
+  if (explicitBenchmarkSetId) return result;
+
+  const missingByScope = new Map<string, { scope: BenchmarkScope; listings: ListingRow[] }>();
+  for (const listing of listings) {
+    if (result.byListingId.has(listing.id)) continue;
+    const scope = scopes.get(listing.id);
+    if (!scope) {
+      result.identificationFailed++;
+      continue;
+    }
+    const group = missingByScope.get(scope.scopeKey) ?? { scope, listings: [] };
+    group.listings.push(listing);
+    missingByScope.set(scope.scopeKey, group);
+  }
+
+  const delayMs = Number(process.env['COPY_BENCHMARK_CAPTURE_DELAY_MS'] ?? DEFAULT_BENCHMARK_CAPTURE_DELAY_MS);
+  if (!Number.isFinite(delayMs) || delayMs < 0) {
+    throw new Error('COPY_BENCHMARK_CAPTURE_DELAY_MS must be a non-negative number');
+  }
+  let captureIndex = 0;
+  for (const { scope, listings: scopedListings } of missingByScope.values()) {
+    if (captureIndex > 0 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    captureIndex++;
+    result.externalRequests++;
+    try {
+      const capture = await captureRakutenBenchmark({
+        query: scope.query,
+        scopeKey: scope.scopeKey,
+        categoryId: scope.categoryId ?? undefined,
+        categoryName: scope.categoryName ?? undefined,
+        limit: 10,
+      });
+      const quality = assessBenchmarkCandidates(capture, scope);
+      if (!quality.valid) {
+        throw new Error(quality.errors.join('; '));
+      }
+      const persisted = await persistBenchmarkSet(supabase, capture, { selectionMode: 'automatic' });
+      result.requests += 3;
+      await activateBenchmarkSet(supabase, persisted.setId);
+      result.requests++;
+      result.rowsWritten += 1 + capture.items.length;
+      const benchmark = benchmarkFromCapture(persisted.setId, persisted.version, capture);
+      for (const listing of scopedListings) result.byListingId.set(listing.id, benchmark);
+      result.identified += scopedListings.length;
+      console.log(JSON.stringify({
+        event: 'copy_benchmark_identified',
+        scopeKey: scope.scopeKey,
+        query: scope.query,
+        benchmarkId: persisted.setId,
+        benchmarkVersion: persisted.version,
+        quality,
+        listingIds: scopedListings.map((listing) => listing.id),
+      }));
+    } catch (error) {
+      result.identificationFailed += scopedListings.length;
+      console.warn(JSON.stringify({
+        event: 'copy_benchmark_identification_failed',
+        scopeKey: scope.scopeKey,
+        query: scope.query,
+        listingIds: scopedListings.map((listing) => listing.id),
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+  return result;
 }
 
 async function fetchWorkItems(listingIds: string[]): Promise<Map<string, WorkItemRow>> {
@@ -207,7 +574,7 @@ async function fetchReusableProposals(
       : structured as unknown as CopyProposal;
     if (!candidate || validateProposal(
       candidate, identity.listing.title, identity.listing.description,
-      JSON.stringify(identity.listing.trusted_facts),
+      identity.listing.verified_claim_pack ?? '',
     ).length > 0) continue;
     result.set(identity.listing.id, {
       generated: {
@@ -218,6 +585,9 @@ async function fetchReusableProposals(
         prompt: identity.prompt,
         inputHash: identity.inputHash,
         outputHash: String(row.output_hash ?? ''),
+        benchmarkEvaluation: identity.listing.benchmark
+          ? evaluateAgainstBenchmark(identity.listing, candidate, identity.listing.benchmark)
+          : null,
       },
       reviewId: String(row.id),
       resultId: typeof row.result_id === 'string' ? row.result_id : null,
@@ -231,7 +601,7 @@ async function ensureWorkItem(
   listing: ListingRow,
   existing: WorkItemRow | undefined,
   proposal: CopyProposal,
-  proposalResult: Pick<CopyProposalResult, 'inputHash' | 'outputHash' | 'validationStatus' | 'llmModel' | 'promptVersion'>,
+  proposalResult: Pick<CopyProposalResult, 'inputHash' | 'outputHash' | 'validationStatus' | 'llmModel' | 'promptVersion' | 'benchmarkEvaluation'>,
 ): Promise<WorkItemRow> {
   const copyContext = {
     kind: 'listing_copy',
@@ -239,6 +609,8 @@ async function ensureWorkItem(
     proposal_description: proposal.description,
     proposal_confidence: proposal.confidence,
     proposal_rationale: proposal.rationale,
+    proposal_claim_selection: proposal.claimSelection ?? null,
+    proposal_claim_attributions: proposal.claimAttributions ?? null,
     proposal_hash: proposalResult.outputHash,
     validation_status: proposalResult.validationStatus,
     model: proposalResult.llmModel,
@@ -247,6 +619,10 @@ async function ensureWorkItem(
     original_title: listing.title,
     original_description: listing.description,
     trusted_facts: listing.trusted_facts,
+    verified_claim_pack: listing.verified_claim_pack,
+    benchmark_id: listing.benchmark?.id ?? null,
+    benchmark_version: listing.benchmark?.version ?? null,
+    benchmark_evaluation: proposalResult.benchmarkEvaluation,
   };
   if (existing) {
     const { data, error } = await supabase.from('listing_work_items').update({
@@ -289,7 +665,7 @@ async function ensureWorkItem(
 }
 
 async function persistProposal(result: CopyProposalResult, listing: ListingRow): Promise<void> {
-  const llmRuntime = process.env['LISTING_COPY_PROVIDER'] ?? 'ollama';
+  const llmRuntime = process.env['LISTING_COPY_PROVIDER'] ?? 'deepseek';
   const runStatus = result.validationStatus === 'failed' ? 'failed' : 'completed';
   const { data: run, error: runError } = await supabase.from('listing_intelligence_runs').insert({
     run_type: 'qwen_review',
@@ -318,7 +694,7 @@ async function persistProposal(result: CopyProposalResult, listing: ListingRow):
     status: resultStatus,
     source_snapshot_hash: result.inputHash,
     source_snapshot_version: listing.content_revision,
-    payload: { kind: 'listing_copy', proposal: result.proposal },
+    payload: { kind: 'listing_copy', proposal: result.proposal, benchmark_evaluation: result.benchmarkEvaluation },
     validation_status: result.validationStatus,
     validation_errors: result.validationErrors,
   }).select('id').single();
@@ -332,6 +708,8 @@ async function persistProposal(result: CopyProposalResult, listing: ListingRow):
     result_id: result.resultId,
     work_item_id: result.workItemId || null,
     llm_model: result.llmModel,
+    llm_provider: llmRuntime === 'deepseek' ? 'deepseek' : 'local',
+    llm_runtime: llmRuntime,
     prompt_profile: result.promptProfile,
     prompt_version: result.promptVersion,
     input_hash: result.inputHash,
@@ -345,8 +723,14 @@ async function persistProposal(result: CopyProposalResult, listing: ListingRow):
     recommendations: [],
     suggested_title: result.proposal?.title ?? null,
     suggested_description: result.proposal?.description ?? null,
-    structured_output: { kind: 'listing_copy', proposal: result.proposal },
-    raw_request: { prompt_profile: result.promptProfile, prompt_version: result.promptVersion },
+    structured_output: { kind: 'listing_copy', proposal: result.proposal, benchmark_evaluation: result.benchmarkEvaluation },
+    raw_request: {
+      prompt_profile: result.promptProfile,
+      prompt_version: result.promptVersion,
+      benchmark_id: listing.benchmark?.id ?? null,
+      benchmark_version: listing.benchmark?.version ?? null,
+      verified_claim_pack: listing.verified_claim_pack ?? null,
+    },
     raw_response: {},
     validation_status: result.validationStatus,
     validation_errors: result.validationErrors,
@@ -414,12 +798,18 @@ async function applyApproved(
       description: typeof context?.proposal_description === 'string' ? context.proposal_description : null,
       confidence: typeof context?.proposal_confidence === 'number' ? context.proposal_confidence : 0,
       rationale: typeof context?.proposal_rationale === 'string' ? context.proposal_rationale : '',
+      ...(context?.proposal_claim_selection && typeof context.proposal_claim_selection === 'object'
+        ? { claimSelection: context.proposal_claim_selection as CopyProposal['claimSelection'] }
+        : {}),
+      ...(Array.isArray(context?.proposal_claim_attributions)
+        ? { claimAttributions: context.proposal_claim_attributions as NonNullable<CopyProposal['claimAttributions']> }
+        : {}),
     };
     const originalTitle = typeof context?.original_title === 'string' ? context.original_title : null;
     const originalDescription = typeof context?.original_description === 'string' ? context.original_description : null;
-    const trustedFacts = context?.trusted_facts && typeof context.trusted_facts === 'object'
-      ? JSON.stringify(context.trusted_facts) : '';
-    if (validateProposal(proposal, originalTitle, originalDescription, trustedFacts).length > 0) {
+    const claimPack = context?.verified_claim_pack && typeof context.verified_claim_pack === 'object'
+      ? context.verified_claim_pack as ListingClaimPack : '';
+    if (validateProposal(proposal, originalTitle, originalDescription, claimPack).length > 0) {
       summary.stale++;
       continue;
     }
@@ -461,6 +851,7 @@ async function applyApproved(
           platform: String(row.platform), shop_code: String(row.shop_code),
           title: proposal.title, description: proposal.description,
           variant_id: null, product_spu_id: null, product_family_id: null,
+          category_id: null, category_name: null,
           content_revision: outcome.contentRevision ?? revision + 1,
           is_hero: false, trusted_facts: {},
         });
@@ -473,7 +864,7 @@ async function applyApproved(
 }
 
 async function main(): Promise<void> {
-  const provider = process.env['LISTING_COPY_PROVIDER'] ?? 'ollama';
+  const provider = process.env['LISTING_COPY_PROVIDER'] ?? 'deepseek';
   if (provider !== 'ollama' && provider !== 'deepseek') {
     throw new Error('LISTING_COPY_PROVIDER must be ollama or deepseek');
   }
@@ -499,6 +890,9 @@ async function main(): Promise<void> {
     selected: 0, proposed: 0, valid: 0, invalid: 0, autoApplied: 0,
     awaitingApproval: 0, approvedApplied: 0, stale: 0, failed: 0,
     measurementFailed: 0, requestCount: 0, rowCount: 0, runtimeMs: 0,
+    benchmarked: 0, missingBenchmark: 0, benchmarkImproved: 0, benchmarkNotImproved: 0,
+    benchmarkReused: 0, benchmarkStale: 0, benchmarkIdentified: 0,
+    benchmarkIdentificationFailed: 0, benchmarkExternalRequests: 0, benchmarkRowsWritten: 0,
   };
   try {
     if (applyingApproved) {
@@ -513,6 +907,30 @@ async function main(): Promise<void> {
       summary.selected = selection.listings.length;
       summary.requestCount += selection.requests;
       summary.rowCount += selection.rowsRead;
+      const benchmarks = await resolveOrIdentifyBenchmarks(selection.listings, argValue('benchmark-set-id'));
+      summary.requestCount += benchmarks.requests;
+      summary.rowCount += benchmarks.rowsRead;
+      summary.benchmarkReused += benchmarks.reused;
+      summary.benchmarkStale += benchmarks.stale;
+      summary.benchmarkIdentified += benchmarks.identified;
+      summary.benchmarkIdentificationFailed += benchmarks.identificationFailed;
+      summary.benchmarkExternalRequests += benchmarks.externalRequests;
+      summary.benchmarkRowsWritten += benchmarks.rowsWritten;
+      for (const listing of selection.listings) {
+        listing.benchmark = benchmarks.byListingId.get(listing.id);
+        if (listing.benchmark) summary.benchmarked++;
+        else summary.missingBenchmark++;
+        console.log(JSON.stringify({
+          event: 'copy_benchmark_resolution',
+          listingId: listing.id,
+          categoryId: listing.category_id,
+          categoryName: listing.category_name,
+          benchmarkId: listing.benchmark?.id ?? null,
+          benchmarkVersion: listing.benchmark?.version ?? null,
+          benchmarkScopeKey: listing.benchmark?.scopeKey ?? null,
+          benchmarkSelectionMode: listing.benchmark?.selectionMode ?? null,
+        }));
+      }
       const workItems = await fetchWorkItems(selection.listings.map((listing) => listing.id));
       summary.requestCount++;
       const reusableProposals = await fetchReusableProposals(selection.listings, config);
@@ -523,6 +941,11 @@ async function main(): Promise<void> {
         const generated = reusable?.generated ?? await generateProposal(listing, config, modelCall);
         if (!reusable) summary.requestCount++;
         if (generated.proposal) summary.proposed++;
+        if (generated.benchmarkEvaluation?.scoreDelta && generated.benchmarkEvaluation.scoreDelta > 0) {
+          summary.benchmarkImproved++;
+        } else if (listing.benchmark) {
+          summary.benchmarkNotImproved++;
+        }
         if (generated.validationStatus === 'valid' || generated.validationStatus === 'repaired') summary.valid++;
         else if (generated.validationStatus === 'invalid') summary.invalid++;
         else summary.failed++;
@@ -534,6 +957,12 @@ async function main(): Promise<void> {
           validationErrors: generated.validationErrors,
           repairAttempts: generated.repairAttempts,
           reused: Boolean(reusable),
+          modelProvider: config.provider,
+          model: config.model,
+          promptVersion: config.promptVersion,
+          benchmarkEvaluation: generated.benchmarkEvaluation,
+          before: { title: listing.title, description: listing.description },
+          proposed: generated.proposal,
         }));
 
         const proposalResult: CopyProposalResult = {
@@ -543,6 +972,7 @@ async function main(): Promise<void> {
           validationErrors: generated.validationErrors, repairAttempts: generated.repairAttempts,
           llmModel: config.model, promptProfile: config.promptProfile, promptVersion: config.promptVersion,
           inputHash: generated.inputHash, outputHash: generated.outputHash,
+          benchmarkEvaluation: generated.benchmarkEvaluation,
           reviewId: reusable?.reviewId ?? null,
           resultId: reusable?.resultId ?? null,
           runId: reusable?.runId ?? null,
@@ -553,6 +983,8 @@ async function main(): Promise<void> {
           (generated.validationStatus === 'valid' || generated.validationStatus === 'repaired');
         const canAutoApply = mode === 'auto' && generated.validationStatus === 'valid' &&
           Boolean(generated.proposal) && generated.proposal!.confidence >= config.confidenceThreshold &&
+          Boolean(generated.benchmarkEvaluation) &&
+          Boolean(listing.benchmark?.descriptionTopics.some((topic) => topic.terms.length > 0)) &&
           !listing.is_hero && config.autoShops.has(listing.shop_code);
 
         if (valid && (mode === 'approval' || (mode === 'auto' && !canAutoApply))) {

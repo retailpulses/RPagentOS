@@ -13,12 +13,14 @@ import {
   idempotencyKey,
   type OllamaCallFn,
 } from './improve-copy.js';
-import { type CopyProposal, type ListingRow, type CopyImproveConfig } from './types.js';
+import { evaluateAgainstBenchmark, findBenchmarkCopyOverlap } from './benchmark.js';
+import { type CopyBenchmark, type CopyProposal, type ListingRow, type CopyImproveConfig } from './types.js';
 
 const testConfig: CopyImproveConfig = {
   enabled: true,
   autoShops: new Set(['shop1', 'shop2']),
   confidenceThreshold: 0.85,
+  provider: 'ollama',
   model: 'qwen3.5:9b',
   ollamaUrl: 'http://127.0.0.1:11434',
   promptProfile: 'rakuten_copy_improvement_v1',
@@ -35,15 +37,38 @@ function makeListing(overrides: Partial<ListingRow> = {}): ListingRow {
     variant_id: 'variant-1',
     product_spu_id: 'spu-1',
     product_family_id: 'family-1',
+    category_id: '100001',
+    category_name: '収納用品',
     content_revision: 2,
     is_hero: false,
-    trusted_facts: { material: 'ポリエステル' },
+    trusted_facts: { material: 'ポリエステル', width: '30cm', depth: '20cm', height: '15cm' },
+    verified_claim_pack: {
+      parentSpu: { spuCode: 'SPU-1', productTypes: ['収納ボックス'], sizes: [], tripDuration: null, features: ['大容量'] },
+      selectedVariant: {
+        itemCode: 'ITEM-1', weightKg: null, packageQuantity: null,
+        countryOfOrigin: null, assemblyStatus: null,
+      },
+      commonAcrossChildren: {
+        weightKg: null, packageQuantity: null, countryOfOrigin: null, assemblyStatus: null,
+      },
+      assortment: { strategy: 'unknown', childCount: 1, sizes: [] },
+      groundedNumericTokens: ['30cm', '20cm', '15cm'],
+      unsupportedOrMissing: [],
+    },
     ...overrides,
   };
 }
 
 function mockOllama(response: CopyProposal): OllamaCallFn {
-  return async () => ({ content: JSON.stringify(response), error: undefined });
+  return async () => ({
+    content: JSON.stringify({
+      title_claim_ids: response.title === null ? [] : ['parent.product_types'],
+      description_claim_ids: response.description === null ? [] : ['parent.product_types'],
+      confidence: response.confidence,
+      rationale: response.rationale,
+    }),
+    error: undefined,
+  });
 }
 
 function mockOllamaError(message: string): OllamaCallFn {
@@ -53,6 +78,32 @@ function mockOllamaError(message: string): OllamaCallFn {
 function mockOllamaRaw(content: string): OllamaCallFn {
   return async () => ({ content, error: undefined });
 }
+
+const sofaBenchmark: CopyBenchmark = {
+  id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  marketplace: 'rakuten',
+  categoryId: '566180',
+  categoryName: '電動リクライニングソファ',
+  scopeKey: 'query:test-sofa',
+  selectionMode: 'automatic',
+  version: 1,
+  sourceKind: 'rakuten_search_organic',
+  capturedAt: '2026-08-10T00:00:00Z',
+  titleTerms: ['電動リクライニングソファ', '2人掛け', '左右独立'],
+  descriptionTopics: [
+    { name: '寸法・設置', terms: ['幅', '奥行', '設置'] },
+    { name: '素材', terms: ['素材', 'ファブリック'] },
+  ],
+  assortment: {
+    strategy: 'single_size', observedSizes: ['S'], multiSizeListingCount: 0,
+    multiSizeListingRatio: 0,
+  },
+  items: [{
+    externalListingId: 'shop/item-1', rankPosition: 1, isSponsored: false,
+    title: '電動リクライニングソファ 2人掛け 左右独立 ファブリック',
+    description: '独自の長い説明文をそのまま複製してはいけません。設置寸法をご確認ください。',
+  }],
+};
 
 // ─── proposal parsing and deterministic validation ────────────────────
 
@@ -80,6 +131,19 @@ test('parseProposalFromLLM handles null title/description', () => {
   assert.ok(result.proposal);
   assert.equal(result.proposal!.title, null);
   assert.equal(result.proposal!.description, null);
+});
+
+test('parseProposalFromLLM accepts deterministic claim-ID selection', () => {
+  const result = parseProposalFromLLM(JSON.stringify({
+    title_claim_ids: ['parent.product_types', 'parent.sizes'],
+    description_claim_ids: ['parent.feature.tsa_lock'],
+    confidence: 0.9,
+    rationale: 'selected verified claims',
+  }));
+  assert.deepEqual(result.proposal?.claimSelection, {
+    titleClaimIds: ['parent.product_types', 'parent.sizes'],
+    descriptionClaimIds: ['parent.feature.tsa_lock'],
+  });
 });
 
 test('parseProposalFromLLM handles markdown code fences', () => {
@@ -138,7 +202,7 @@ test('validateProposal rejects unsourced numeric facts', () => {
   assert.ok(errors.some((e) => e.includes('unsourced numeric fact') && e.includes('50cm')));
 });
 
-test('validateProposal accepts numeric facts present in source', () => {
+test('validateProposal rejects numeric facts present only in unverified current copy', () => {
   const sourceTitle = '30cm ボックス 大容量';
   const sourceDesc = 'サイズは30cmです。';
   const errors = validateProposal(
@@ -146,8 +210,17 @@ test('validateProposal accepts numeric facts present in source', () => {
     sourceTitle,
     sourceDesc,
   );
-  const unsourced = errors.filter((e) => e.includes('unsourced numeric fact'));
-  assert.equal(unsourced.length, 0);
+  assert.ok(errors.some((e) => e.includes('unsourced numeric fact')));
+});
+
+test('validateProposal accepts numeric facts present in trusted facts', () => {
+  const errors = validateProposal(
+    { title: '30cm 大容量ボックス', description: '30cmの商品です。', confidence: 0.8, rationale: 'used verified fact' },
+    'テスト商品',
+    'テスト説明',
+    JSON.stringify({ width: '30cm' }),
+  );
+  assert.equal(errors.filter((e) => e.includes('unsourced numeric fact')).length, 0);
 });
 
 test('validateProposal rejects prohibited claims', () => {
@@ -175,6 +248,158 @@ test('validateProposal blocks prohibited claims even when present in source', ()
     'テスト説明',
   );
   assert.equal(errors.filter((e) => e.includes('prohibited claim')).length, 1);
+});
+
+test('validateProposal rejects high-risk commercial claims without trusted evidence', () => {
+  const errors = validateProposal(
+    { title: 'テスト商品', description: '厳しい品質基準を満たした安心の日本仕様です。', confidence: 0.8, rationale: 'R' },
+    'テスト商品',
+    '現在の説明にも日本仕様と書かれています。',
+    JSON.stringify({ material: 'steel' }),
+  );
+  assert.ok(errors.some((error) => error.includes('日本仕様')));
+  assert.ok(errors.some((error) => error.includes('品質基準')));
+});
+
+test('validateProposal rejects unsupported suitcase feature claims', () => {
+  const errors = validateProposal(
+    {
+      title: 'スーツケース Sサイズ 機内持込',
+      description: '360度キャスターとエンボス加工を採用。',
+      confidence: 0.8,
+      rationale: 'R',
+    },
+    'スーツケース Sサイズ',
+    '既存説明',
+    JSON.stringify({ size: 'S', product_weight_kg: 2.7 }),
+  );
+  assert.ok(errors.some((error) => error.includes('機内持込')));
+  assert.ok(errors.some((error) => error.includes('360度')));
+  assert.ok(errors.some((error) => error.includes('エンボス加工')));
+});
+
+test('validateProposal allows generic benefits when their hard features are evidenced', () => {
+  const errors = validateProposal(
+    {
+      title: 'スーツケース Sサイズ 大容量',
+      description: '360度キャスターで移動がスムーズ。TSAロックで海外旅行も安心。メッシュポケットで整理しやすく便利です。',
+      confidence: 0.8,
+      rationale: 'R',
+    },
+    'スーツケース Sサイズ',
+    '既存説明',
+    JSON.stringify({
+      size: 'S', caster: '360度キャスター', lock: 'TSAロック',
+      interior: 'メッシュポケット',
+    }),
+  );
+  assert.deepEqual(errors, []);
+});
+
+test('validateProposal rejects invented TSA inspection mechanics but not generic reassurance', () => {
+  const errors = validateProposal(
+    {
+      title: 'スーツケース Sサイズ TSAロック',
+      description: 'TSAロックで海外旅行も安心。鍵を壊さずに検査が可能です。',
+      confidence: 0.8,
+      rationale: 'R',
+    },
+    'スーツケース Sサイズ',
+    '既存説明',
+    JSON.stringify({ size: 'S', lock: 'TSAロック' }),
+  );
+  assert.equal(errors.some((error) => error.includes('海外旅行')), false);
+  assert.ok(errors.some((error) => error.includes('鍵を壊さず')));
+  assert.ok(errors.some((error) => error.includes('検査が可能')));
+});
+
+test('validateProposal still rejects an invented hard feature wrapped in a generic benefit', () => {
+  const errors = validateProposal(
+    {
+      title: 'スーツケース Sサイズ',
+      description: '360度キャスターで移動がスムーズです。',
+      confidence: 0.8,
+      rationale: 'R',
+    },
+    'スーツケース Sサイズ',
+    '既存説明',
+    JSON.stringify({ size: 'S' }),
+  );
+  assert.ok(errors.some((error) => error.includes('360度')));
+  assert.ok(errors.some((error) => error.includes('キャスター')));
+  assert.equal(errors.some((error) => error.includes('スムーズ')), false);
+});
+
+test('enriched suitcase candidate passes when every hard fact is evidenced', () => {
+  const errors = validateProposal(
+    {
+      title: 'スーツケース Sサイズ キャリーケース 旅行用 1～3泊 41.1L 2.7kg TSAロック 360度キャスター エンボス ABS+PC',
+      description: '1～3泊の旅行に最適なSサイズのスーツケースです。容量は約41.1L、外寸は約56×37×24cm、重量は約2.7kg。直径50mmの360度回転キャスターと3段階調節可能なキャリーバーを搭載しています。TSAダイヤルロックでセキュリティも安心。内装にはクロスベルトとメッシュポケットが付き、荷物を整理しやすくなっています。表面はエンボス加工で、ABS+PC混合樹脂製です。Sサイズには側面ハンドルと底足がない点にご注意ください。',
+      confidence: 0.9,
+      rationale: 'Evidence-enriched commercial candidate',
+    },
+    'スーツケース Sサイズ',
+    '既存説明',
+    JSON.stringify({
+      trip: '1～3泊', capacity: '41.1L', outer: '56×37×24cm', weight: '2.7kg',
+      caster: '直径50mm 360度キャスター', bar: '3段階調節 キャリーバー',
+      lock: 'TSAロック TSAダイヤルロック', interior: 'クロスベルト メッシュポケット',
+      shell: 'エンボス加工 ABS+PC混合樹脂', absent: '側面ハンドル 底足',
+    }),
+  );
+  assert.deepEqual(errors, []);
+});
+
+test('validateProposal blocks sizes outside a single-size SPU claim pack', () => {
+  const listing = makeListing({
+    verified_claim_pack: {
+      parentSpu: { spuCode: 'PP298906', productTypes: ['スーツケース'], sizes: ['S'], tripDuration: '2～3泊', features: ['TSAロック'] },
+      selectedVariant: {
+        itemCode: 'PP298906DAA', weightKg: 2.7, packageQuantity: 1,
+        countryOfOrigin: '中国', assemblyStatus: '要組立品',
+      },
+      commonAcrossChildren: {
+        weightKg: 2.7, packageQuantity: 1, countryOfOrigin: '中国', assemblyStatus: '要組立品',
+      },
+      assortment: { strategy: 'single_size', childCount: 14, sizes: ['S'] },
+      groundedNumericTokens: ['2.7kg', '1個', '2泊', '3泊', '2～3泊'],
+      unsupportedOrMissing: ['M/L availability outside this SPU'],
+    },
+  });
+  const errors = validateProposal(
+    { title: 'スーツケース S/M/Lサイズ', description: '2～3泊向けです。', confidence: 0.8, rationale: 'R' },
+    listing.title,
+    listing.description,
+    listing.verified_claim_pack,
+  );
+  assert.ok(errors.some((error) => error.includes('outside the verified SPU assortment: M')));
+  assert.ok(errors.some((error) => error.includes('outside the verified SPU assortment: L')));
+});
+
+test('unsupportedOrMissing labels do not become claim evidence', () => {
+  const listing = makeListing({
+    verified_claim_pack: {
+      parentSpu: { spuCode: 'PP298906', productTypes: ['スーツケース'], sizes: ['S'], tripDuration: null, features: [] },
+      selectedVariant: {
+        itemCode: 'PP298906DAA', weightKg: 2.7, packageQuantity: 1,
+        countryOfOrigin: '中国', assemblyStatus: null,
+      },
+      commonAcrossChildren: {
+        weightKg: 2.7, packageQuantity: 1, countryOfOrigin: '中国', assemblyStatus: null,
+      },
+      assortment: { strategy: 'single_size', childCount: 14, sizes: ['S'] },
+      groundedNumericTokens: ['2.7kg', '1個'],
+      unsupportedOrMissing: ['360度キャスター', '14色展開'],
+    },
+  });
+  const errors = validateProposal(
+    { title: 'Sサイズ スーツケース', description: '360度キャスター、14色展開です。', confidence: 0.8, rationale: 'R' },
+    listing.title,
+    listing.description,
+    listing.verified_claim_pack,
+  );
+  assert.ok(errors.some((error) => error.includes('360度')));
+  assert.ok(errors.some((error) => error.includes('14色')));
 });
 
 test('validateProposal requires material change', () => {
@@ -214,6 +439,33 @@ test('validateProposal enforces Rakuten title length', () => {
     '元説明',
   );
   assert.ok(errors.some((error) => error.includes('127 characters')));
+});
+
+test('benchmark evaluation compares before and proposal against one fixed version', () => {
+  const listing = makeListing({
+    title: '電動ソファ 2人掛け',
+    description: 'ファブリック素材です。',
+  });
+  const result = evaluateAgainstBenchmark(listing, {
+    title: '電動リクライニングソファ 2人掛け 左右独立',
+    description: 'ファブリック素材です。設置前に幅と奥行をご確認ください。',
+    confidence: 0.9,
+    rationale: 'benchmark coverage improved',
+  }, sofaBenchmark);
+  assert.ok(result);
+  assert.equal(result!.benchmarkId, sofaBenchmark.id);
+  assert.ok(result!.scoreDelta > 0);
+  assert.deepEqual(result!.regressions, []);
+});
+
+test('benchmark overlap detects copied distinctive competitor wording', () => {
+  const overlap = findBenchmarkCopyOverlap({
+    title: null,
+    description: '独自の長い説明文をそのまま複製してはいけません。設置寸法をご確認ください。',
+    confidence: 0.9,
+    rationale: 'copied',
+  }, sofaBenchmark, 20);
+  assert.ok(overlap);
 });
 
 // ─── mode and approval-policy behavior ───────────────────────────────
@@ -265,6 +517,23 @@ test('buildConfig parses auto shops from env', () => {
   assert.ok(config.autoShops.has('shop2'));
   assert.ok(config.autoShops.has('shop3'));
   assert.equal(config.autoShops.size, 3);
+});
+
+test('buildConfig defaults copywriting to DeepSeek without changing image configuration', () => {
+  const previousProvider = process.env['LISTING_COPY_PROVIDER'];
+  const previousModel = process.env['LISTING_COPY_MODEL'];
+  delete process.env['LISTING_COPY_PROVIDER'];
+  delete process.env['LISTING_COPY_MODEL'];
+  try {
+    const config = buildConfig();
+    assert.equal(config.provider, 'deepseek');
+    assert.equal(config.model, 'deepseek-chat');
+  } finally {
+    if (previousProvider === undefined) delete process.env['LISTING_COPY_PROVIDER'];
+    else process.env['LISTING_COPY_PROVIDER'] = previousProvider;
+    if (previousModel === undefined) delete process.env['LISTING_COPY_MODEL'];
+    else process.env['LISTING_COPY_MODEL'] = previousModel;
+  }
 });
 
 test('buildConfig handles empty auto shops', () => {
@@ -366,9 +635,9 @@ test('generateProposal repairs invalid output', async () => {
   const ollamaCall: OllamaCallFn = async (_prompt, _model) => {
     callCount++;
     if (callCount === 1) {
-      return { content: JSON.stringify({ title: '50cm 商品', description: 'D', confidence: 0.9, rationale: 'R' }), error: undefined };
+      return { content: JSON.stringify({ title_claim_ids: ['unknown.claim'], description_claim_ids: [], confidence: 0.9, rationale: 'R' }), error: undefined };
     }
-    return { content: JSON.stringify({ title: '30cm 商品', description: 'D', confidence: 0.9, rationale: 'R' }), error: undefined };
+    return { content: JSON.stringify({ title_claim_ids: ['parent.product_types'], description_claim_ids: ['parent.product_types'], confidence: 0.9, rationale: 'R' }), error: undefined };
   };
   const result = await generateProposal(listing, testConfig, ollamaCall);
   assert.equal(result.validationStatus, 'repaired');
@@ -387,15 +656,15 @@ test('generateProposal returns invalid after failed repair', async () => {
   assert.equal(result.repairAttempts, 1);
 });
 
-test('generateProposal detects prohibited claims and attempts repair', async () => {
+test('generateProposal rejects unavailable claim IDs and attempts repair', async () => {
   const listing = makeListing({ title: '普通の商品', description: '普通の説明' });
   let callCount = 0;
   const ollamaCall: OllamaCallFn = async (_prompt, _model) => {
     callCount++;
     if (callCount === 1) {
-      return { content: JSON.stringify({ title: '最安 商品', description: 'D', confidence: 0.9, rationale: 'R' }), error: undefined };
+      return { content: JSON.stringify({ title_claim_ids: ['prohibited.cheapest'], description_claim_ids: [], confidence: 0.9, rationale: 'R' }), error: undefined };
     }
-    return { content: JSON.stringify({ title: 'お得な商品', description: 'D', confidence: 0.9, rationale: 'R' }), error: undefined };
+    return { content: JSON.stringify({ title_claim_ids: ['parent.product_types'], description_claim_ids: [], confidence: 0.9, rationale: 'R' }), error: undefined };
   };
   const result = await generateProposal(listing, testConfig, ollamaCall);
   assert.equal(result.validationStatus, 'repaired');
@@ -478,15 +747,17 @@ test('applyContentUpdate handles fetch errors', async () => {
 
 // ─── generateProposal with valid output rejected by validation ───────
 
-test('generateProposal trims blank title to null and validates', async () => {
+test('generateProposal renders a description-only claim selection', async () => {
   const listing = makeListing({ title: '元タイトル', description: '元説明' });
-  const ollamaCall = mockOllamaRaw(JSON.stringify({ title: '  ', description: 'D', confidence: 0.9, rationale: 'R' }));
+  const ollamaCall = mockOllamaRaw(JSON.stringify({
+    title_claim_ids: [], description_claim_ids: ['parent.product_types'], confidence: 0.9, rationale: 'R',
+  }));
   const result = await generateProposal(listing, testConfig, ollamaCall);
   assert.equal(result.validationStatus, 'valid');
   assert.equal(result.proposal?.title, null);
 });
 
-test('generateProposal accepts all-null proposal as no material change', async () => {
+test('generateProposal accepts an explicit no-op when no safe improvement exists', async () => {
   const listing = makeListing();
   const result = await generateProposal(listing, testConfig, mockOllama({
     title: null,
@@ -494,8 +765,8 @@ test('generateProposal accepts all-null proposal as no material change', async (
     confidence: 0.9,
     rationale: 'current copy is already optimal',
   }));
-  assert.equal(result.validationStatus, 'invalid');
-  assert.ok(result.validationErrors.some((e) => e.includes('no material change')));
+  assert.equal(result.validationStatus, 'valid');
+  assert.deepEqual(result.validationErrors, []);
 });
 
 test('callDeepSeek requests JSON output and returns assistant content', async () => {

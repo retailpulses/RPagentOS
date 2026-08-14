@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import {
   type CopyMode,
+  type CopyProvider,
   type CopyImproveOptions,
   type CopyImproveConfig,
   type ListingRow,
@@ -11,11 +12,13 @@ import {
   type FinalizationSummary,
   type ContentUpdateOutcome,
   type ApplyContentUpdateOptions,
+  type ListingClaimPack,
 } from './types.js';
 import { buildCopyImprovementPrompt, PROMPT_PROFILE, PROMPT_VERSION } from './copy-prompts.js';
+import { evaluateAgainstBenchmark, findBenchmarkCopyOverlap } from './benchmark.js';
+import { materializeClaimSelection } from './claim-attribution.js';
 
 const DEFAULT_OLLAMA_URL = process.env['OLLAMA_BASE_URL'] ?? 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = process.env['LISTING_COPY_MODEL'] ?? process.env['LISTING_QWEN_MODEL'] ?? 'qwen3.5:9b';
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -29,6 +32,11 @@ function hash(value: unknown): string {
 }
 
 export function buildConfig(): CopyImproveConfig {
+  const rawProvider = process.env['LISTING_COPY_PROVIDER'] ?? 'deepseek';
+  if (rawProvider !== 'deepseek' && rawProvider !== 'ollama') {
+    throw new Error('LISTING_COPY_PROVIDER must be ollama or deepseek');
+  }
+  const provider: CopyProvider = rawProvider === 'ollama' ? 'ollama' : 'deepseek';
   const enabled = process.env['COPY_IMPROVEMENT_ENABLED'] === 'true';
   const autoShopsRaw = process.env['COPY_IMPROVEMENT_AUTO_SHOPS'] ?? '';
   const autoShops = new Set(
@@ -42,7 +50,8 @@ export function buildConfig(): CopyImproveConfig {
     enabled,
     autoShops,
     confidenceThreshold,
-    model: DEFAULT_MODEL,
+    provider,
+    model: process.env['LISTING_COPY_MODEL'] ?? (provider === 'deepseek' ? 'deepseek-chat' : 'qwen3.5:9b'),
     ollamaUrl: DEFAULT_OLLAMA_URL,
     promptProfile: PROMPT_PROFILE,
     promptVersion: PROMPT_VERSION,
@@ -67,17 +76,64 @@ export function parseLimit(raw: unknown, defaultLimit = 10, maxLimit = 20): numb
 }
 
 const PROHIBITED_CLAIMS = ['no.1', 'ナンバーワン', '最安', '絶対', '完全防水', '医療', '治療', '永久保証'];
+// Only objectively checkable product facts are evidence-gated. Generic,
+// non-quantified benefits (for example 安心, スムーズ, 便利, 整理しやすい)
+// belong in commercial-quality review and must not fail the claim-safety gate.
+const HARD_FACT_EVIDENCE_TERMS = [
+  'pse', '日本仕様', '日本企画', '安全基準', '品質基準', '環境に優しい',
+  '工具不要', '組立不要', '完成品', 'マスターキー',
+  '機内持込', '機内持ち込み', '360度', 'キャスター', 'エンボス加工',
+  'メッシュポケット', 'クロスベルト', '高さ調節', '段階調節', 'キャリーバー',
+  '側面ハンドル', '底足', 'tsaロック', 'ダイヤルロック',
+  'abspc', 'abs樹脂', 'pc混合樹脂',
+  'ベージュ', 'ブラック', 'ホワイト', 'グレー', 'シルバー', 'レッド', 'ブルー', 'グリーン', 'ピンク',
+  'abs', '樹脂',
+  'アメリカ運輸保安局', '認可', '施錠したまま', 'セキュリティチェック',
+  '鍵を壊さず', '鍵を傷つけず', '検査が可能',
+  '静音', '消音',
+];
 
 function extractNumericTokens(text: string): string[] {
-  const matches = text.match(/\d+(?:\.\d+)?\s?(?:cm|mm|kg|g|l|ml|L|W|V|kW|個|枚|台|色|年|ヶ月|畳|キロ|センチ|リットル)/g);
+  const matches = text.match(/\d+(?:\.\d+)?\s?(?:cm|mm|kg|g|l|ml|L|W|V|kW|個|枚|台|色|種類|バリエーション|段階|年|ヶ月|日|泊|畳|キロ|センチ|リットル)/g);
   return Array.from(new Set(matches ?? []));
+}
+
+function evidenceText(evidence: ListingClaimPack | string): string {
+  if (typeof evidence === 'string') return evidence.toLowerCase();
+  return stableJson({
+    parentSpu: evidence.parentSpu,
+    selectedVariant: evidence.selectedVariant,
+    commonAcrossChildren: evidence.commonAcrossChildren,
+    assortment: {
+      strategy: evidence.assortment.strategy,
+      sizes: evidence.assortment.sizes,
+    },
+    groundedNumericTokens: evidence.groundedNumericTokens,
+  }).toLowerCase();
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function validateAssortmentSizes(generatedText: string, evidence: ListingClaimPack | string): string[] {
+  if (typeof evidence === 'string' || evidence.assortment.strategy !== 'single_size') return [];
+  const allowed = new Set(evidence.assortment.sizes.map((size) => size.toUpperCase()));
+  const mentioned = Array.from(generatedText.matchAll(/(?:^|[^A-Z])(SS|S|M|L|LL)\s*サイズ/gi))
+    .map((match) => match[1]!.toUpperCase());
+  for (const sequence of generatedText.matchAll(/(?:SS|S|M|L|LL)(?:\s*[\/・、]\s*(?:SS|S|M|L|LL))+/gi)) {
+    mentioned.push(...(sequence[0].match(/SS|LL|S|M|L/gi) ?? []).map((size) => size.toUpperCase()));
+  }
+  return uniqueStrings(mentioned)
+    .filter((size) => !allowed.has(size))
+    .map((size) => `Generated copy claims size outside the verified SPU assortment: ${size}`);
 }
 
 export function validateProposal(
   proposal: CopyProposal,
   sourceTitle: string | null,
   sourceDescription: string | null,
-  trustedFactsText = '',
+  verifiedEvidence: ListingClaimPack | string = '',
 ): string[] {
   const errors: string[] = [];
   if (typeof proposal !== 'object' || proposal === null) return ['proposal must be an object'];
@@ -93,6 +149,24 @@ export function validateProposal(
   const hasMaterialChange =
     (proposal.title !== null && proposal.title !== sourceTitle) ||
     (proposal.description !== null && proposal.description !== sourceDescription);
+  const isExplicitNoOp = proposal.title === null && proposal.description === null;
+
+  if (typeof verifiedEvidence !== 'string') {
+    if (!proposal.claimSelection) {
+      errors.push('proposal must include deterministic claim selection');
+    } else {
+      const rendered = materializeClaimSelection(
+        proposal.claimSelection, verifiedEvidence, proposal.confidence, proposal.rationale,
+      );
+      errors.push(...rendered.errors);
+      if (rendered.proposal.title !== proposal.title || rendered.proposal.description !== proposal.description) {
+        errors.push('proposal copy does not match deterministic claim rendering');
+      }
+      if (stableJson(rendered.proposal.claimAttributions) !== stableJson(proposal.claimAttributions)) {
+        errors.push('proposal claim attributions do not match deterministic claim rendering');
+      }
+    }
+  }
 
   const titleBlank = proposal.title !== null && (typeof proposal.title !== 'string' || !proposal.title.trim());
   const descBlank = proposal.description !== null && (typeof proposal.description !== 'string' || !proposal.description.trim());
@@ -105,15 +179,17 @@ export function validateProposal(
     errors.push('suggested description exceeds 5000 characters');
   }
 
-  if (!titleBlank && !descBlank && !hasMaterialChange) {
+  if (!isExplicitNoOp && !titleBlank && !descBlank && !hasMaterialChange) {
     errors.push('proposal makes no material change to title or description');
   }
 
-  const sourceText = [sourceTitle ?? '', sourceDescription ?? '', trustedFactsText].join('\n').toLowerCase();
+  const trustedFacts = evidenceText(verifiedEvidence);
   const generatedText = [proposal.title ?? '', proposal.description ?? ''].join('\n').toLowerCase();
 
+  errors.push(...validateAssortmentSizes(generatedText, verifiedEvidence));
+
   for (const token of extractNumericTokens(generatedText)) {
-    if (!sourceText.includes(token.toLowerCase())) {
+    if (!trustedFacts.includes(token.toLowerCase())) {
       errors.push(`Generated copy includes unsourced numeric fact: ${token}`);
     }
   }
@@ -121,6 +197,12 @@ export function validateProposal(
   for (const claim of PROHIBITED_CLAIMS) {
     if (generatedText.includes(claim)) {
       errors.push(`Generated copy includes prohibited claim: ${claim}`);
+    }
+  }
+
+  for (const claim of HARD_FACT_EVIDENCE_TERMS) {
+    if (generatedText.includes(claim) && !trustedFacts.includes(claim)) {
+      errors.push(`Generated copy includes hard fact without trusted-fact evidence: ${claim}`);
     }
   }
 
@@ -148,6 +230,12 @@ export function parseProposalFromLLM(text: string): { proposal: CopyProposal | n
 
   const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : null;
   const description = typeof obj.description === 'string' && obj.description.trim() ? obj.description.trim() : null;
+  const titleClaimIds = Array.isArray(obj.title_claim_ids)
+    ? obj.title_claim_ids.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : null;
+  const descriptionClaimIds = Array.isArray(obj.description_claim_ids)
+    ? obj.description_claim_ids.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : null;
   const confidence = typeof obj.confidence === 'number' ? obj.confidence : null;
   const rationale = typeof obj.rationale === 'string' && obj.rationale.trim() ? obj.rationale.trim() : '';
 
@@ -158,7 +246,15 @@ export function parseProposalFromLLM(text: string): { proposal: CopyProposal | n
     return { proposal: null, errors: ['rationale must be a non-empty string'] };
   }
 
-  return { proposal: { title, description, confidence, rationale }, errors: [] };
+  return {
+    proposal: {
+      title, description, confidence, rationale,
+      ...(titleClaimIds !== null && descriptionClaimIds !== null ? {
+        claimSelection: { titleClaimIds, descriptionClaimIds },
+      } : {}),
+    },
+    errors: [],
+  };
 }
 
 export type OllamaCallFn = (prompt: string, model: string) => Promise<{ content: string; error?: string }>;
@@ -226,6 +322,10 @@ export async function callDeepSeek(
   timeoutMs = Number(process.env['LISTING_DEEPSEEK_TIMEOUT_MS'] ?? '120000'),
   fetchFn: typeof fetch = fetch,
 ): Promise<{ content: string; error?: string }> {
+  const configuredMaxTokens = Number(process.env['LISTING_DEEPSEEK_MAX_TOKENS'] ?? '1800');
+  const maxTokens = Number.isFinite(configuredMaxTokens)
+    ? Math.min(Math.max(configuredMaxTokens, 900), 4000)
+    : 1800;
   if (!apiKey) return { content: '', error: 'DEEPSEEK_API_KEY is required' };
   const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1000
     ? Math.min(timeoutMs, 300000)
@@ -244,7 +344,7 @@ export async function callDeepSeek(
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
         temperature: 0.1,
-        max_tokens: 900,
+        max_tokens: maxTokens,
         stream: false,
       }),
       signal: controller.signal,
@@ -269,7 +369,7 @@ export async function generateProposal(
   listing: ListingRow,
   config: CopyImproveConfig,
   ollamaCall: OllamaCallFn,
-): Promise<{ proposal: CopyProposal | null; validationStatus: CopyProposalResult['validationStatus']; validationErrors: string[]; repairAttempts: number; prompt: string; inputHash: string; outputHash: string }> {
+): Promise<{ proposal: CopyProposal | null; validationStatus: CopyProposalResult['validationStatus']; validationErrors: string[]; repairAttempts: number; prompt: string; inputHash: string; outputHash: string; benchmarkEvaluation: CopyProposalResult['benchmarkEvaluation'] }> {
   const { prompt, inputHash } = proposalInputIdentity(listing, config);
 
   let validationErrors: string[] = [];
@@ -282,7 +382,7 @@ export async function generateProposal(
 
     if (result.error) {
       const outputHash = hash(result.error);
-      return { proposal: null, validationStatus: 'failed', validationErrors: [result.error], repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash };
+      return { proposal: null, validationStatus: 'failed', validationErrors: [result.error], repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash, benchmarkEvaluation: null };
     }
 
     const parsed = parseProposalFromLLM(result.content);
@@ -290,28 +390,53 @@ export async function generateProposal(
       validationErrors = parsed.errors;
       if (attempt < 1) continue;
       const outputHash = hash(result.content);
-      return { proposal: null, validationStatus: 'invalid', validationErrors, repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash };
+      return { proposal: null, validationStatus: 'invalid', validationErrors, repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash, benchmarkEvaluation: null };
     }
 
-    validationErrors = validateProposal(
-      parsed.proposal,
+    validationErrors = [];
+    let proposal = parsed.proposal;
+    if (listing.verified_claim_pack && proposal.claimSelection) {
+      const rendered = materializeClaimSelection(
+        proposal.claimSelection,
+        listing.verified_claim_pack,
+        proposal.confidence,
+        proposal.rationale,
+      );
+      proposal = rendered.proposal;
+      validationErrors.push(...rendered.errors);
+    }
+    validationErrors.push(...validateProposal(
+      proposal,
       listing.title,
       listing.description,
-      stableJson(listing.trusted_facts),
-    );
+      listing.verified_claim_pack ?? '',
+    ));
+    const benchmark = listing.benchmark;
+    const benchmarkEvaluation = benchmark
+      ? evaluateAgainstBenchmark(listing, proposal, benchmark)
+      : null;
+    const isExplicitNoOp = proposal.title === null && proposal.description === null;
+    if (benchmark && benchmarkEvaluation && !isExplicitNoOp) {
+      if (benchmarkEvaluation.scoreDelta <= 0) {
+        validationErrors.push('proposal does not improve the fixed benchmark score');
+      }
+      validationErrors.push(...benchmarkEvaluation.regressions);
+      const copiedText = findBenchmarkCopyOverlap(proposal, benchmark);
+      if (copiedText) validationErrors.push('proposal appears to copy distinctive benchmark wording');
+    }
     if (validationErrors.length === 0) {
-      const outputHash = hash(parsed.proposal);
+      const outputHash = hash(proposal);
       const status = attempt > 0 ? 'repaired' : 'valid';
-      return { proposal: parsed.proposal, validationStatus: status, validationErrors: [], repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash };
+      return { proposal, validationStatus: status, validationErrors: [], repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash, benchmarkEvaluation };
     }
 
     if (attempt < 1) continue;
-    const outputHash = hash(parsed.proposal);
-    return { proposal: parsed.proposal, validationStatus: 'invalid', validationErrors, repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash };
+    const outputHash = hash(proposal);
+    return { proposal, validationStatus: 'invalid', validationErrors, repairAttempts: attempt, prompt: attemptPrompt, inputHash, outputHash, benchmarkEvaluation };
   }
 
   const outputHash = hash('unreachable');
-  return { proposal: null, validationStatus: 'failed', validationErrors: ['exhausted repair attempts'], repairAttempts: 1, prompt, inputHash, outputHash };
+  return { proposal: null, validationStatus: 'failed', validationErrors: ['exhausted repair attempts'], repairAttempts: 1, prompt, inputHash, outputHash, benchmarkEvaluation: null };
 }
 
 export type ListingFetcher = (opts: { platform?: string; shopCode?: string; listingId?: string; limit: number }) => Promise<ListingRow[]>;

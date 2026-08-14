@@ -65,6 +65,20 @@ jobs:
             | npx --yes wrangler@4.80.0 pages secret put ORDERMGMT_CATALOG_API_TOKEN \
                 --project-name rpagentos
 
+      - name: Synchronize listing copy internal API token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LISTING_COPY_INTERNAL_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
+        run: |
+          if [ -z "$LISTING_COPY_INTERNAL_API_TOKEN" ]; then
+            echo "::error::LISTING_COPY_INTERNAL_API_TOKEN is not configured"
+            exit 1
+          fi
+          printf '%s\n' "$LISTING_COPY_INTERNAL_API_TOKEN" \
+            | npx --yes wrangler@4.80.0 pages secret put INTERNAL_CATALOG_API_TOKEN \
+                --project-name rpagentos
+
       - name: Verify OrderMgmt catalog credential
         env:
           ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
@@ -82,4 +96,26 @@ jobs:
             sleep 3
           done
           echo "::error::OrderMgmt catalog credential smoke failed (expected authenticated 404, got $STATUS)"
+          exit 1
+
+      - name: Verify listing copy internal API credential
+        env:
+          LISTING_COPY_INTERNAL_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
+        run: |
+          STATUS=""
+          for ATTEMPT in 1 2 3 4 5; do
+            STATUS=$(curl -sS -o /tmp/listing-copy-smoke.json -w '%{http_code}' \
+              -X PATCH \
+              -H "Authorization: Bearer $LISTING_COPY_INTERNAL_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{}' \
+              'https://rpagentos.pages.dev/api/internal/catalog/listings/not-a-uuid/content')
+            if [ "$STATUS" = "400" ]; then
+              echo "Listing copy internal credential accepted by production"
+              exit 0
+            fi
+            echo "Attempt $ATTEMPT/5 returned HTTP $STATUS; retrying"
+            sleep 3
+          done
+          echo "::error::Listing copy credential smoke failed (expected authenticated 400, got $STATUS)"
           exit 1
