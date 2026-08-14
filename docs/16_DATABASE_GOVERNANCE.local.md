@@ -220,6 +220,7 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 - **Credential class:** server-side service role for bounded reads/audit plus dedicated internal API bearer token for revision-checked writes
 - **Rollback:** disable the workflow; restore an affected listing through the existing revisioned catalog lifecycle path using its prior audit snapshot
 - **Approval:** Retailpulses owner requested a live DeepSeek loop on 2026-08-14
+- **Issue:** `retailpulses/RPagentOS#64`
 - **Registry:** `retailpulses/rp-governance-kit` `docs/DATABASE_WORKLOADS.yaml#rakuten_deepseek_copy_live_loop`
 
 ## Database Environment Model
