@@ -43,7 +43,7 @@ jobs:
       LISTING_DEEPSEEK_TIMEOUT_MS: "120000"
       LISTING_DEEPSEEK_MAX_TOKENS: "1800"
       WECOM_LISTING_COPY_WEBHOOK_URL: ${{ secrets.WECOM_LISTING_COPY_WEBHOOK_URL }}
-      COPY_REPORT_FILE: ${{ runner.temp }}/rakuten-copy-loop-report.json
+      COPY_REPORT_FILE: /tmp/rakuten-copy-loop-report.json
       GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
