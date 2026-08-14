@@ -25,6 +25,7 @@ import {
   evaluatePreserveFirstEnrichment,
 } from '../packages/listing-copy/preserve-first-enrich.js';
 import { calculateCopyOpportunity } from '../packages/listing-copy/opportunity-score.js';
+import { buildListingCopyDiff } from '../packages/listing-copy/wecom-report.js';
 
 interface CanaryListing {
   id: string;
@@ -350,7 +351,7 @@ async function runOne(listing: CanaryListing, apiKey: string, model: string): Pr
     proposedScore,
   });
   return {
-    listingId: listing.id, productSpuId: listing.productSpuId,
+    listingId: listing.id, shopCode: listing.shopCode, productSpuId: listing.productSpuId,
     spuCode: listing.productSpu.spu_code ?? null,
     categoryId: listing.categoryId, categoryName: profile.categoryName,
     profileVersion: profile.profileVersion, evidenceFactCount: profile.evidenceFacts.length,
@@ -538,7 +539,7 @@ async function main(): Promise<void> {
       }
     } catch (error) {
       result = {
-        listingId: listing.id, productSpuId: listing.productSpuId,
+        listingId: listing.id, shopCode: listing.shopCode, productSpuId: listing.productSpuId,
         spuCode: listing.productSpu.spu_code ?? null,
         opportunityScore: listing.opportunityScore,
         opportunityReasons: listing.opportunityReasons,
@@ -556,7 +557,8 @@ async function main(): Promise<void> {
     const proposed = result.proposed as { title?: string; description?: string; rationale?: string; confidence?: number } | undefined;
     const audited = Array.isArray(result.auditedHardClaims) ? result.auditedHardClaims as AuditedClaim[] : [];
     return {
-      listingId: result.listingId, productSpuId: result.productSpuId, spuCode: result.spuCode,
+      listingId: result.listingId, shopCode: result.shopCode,
+      productSpuId: result.productSpuId, spuCode: result.spuCode,
       categoryId: result.categoryId, categoryName: result.categoryName,
       opportunityScore: result.opportunityScore, opportunityReasons: result.opportunityReasons,
       evidenceFactCount: result.evidenceFactCount,
@@ -573,6 +575,10 @@ async function main(): Promise<void> {
       beforeCommercialScore: result.beforeCommercialScore,
       proposedCommercialScore: result.proposedCommercialScore,
       commercialDelta: result.commercialDelta,
+      diff: before && proposed ? buildListingCopyDiff({
+        beforeTitle: before.title ?? '', afterTitle: proposed.title ?? before.title ?? '',
+        beforeDescription: before.description ?? '', afterDescription: proposed.description ?? before.description ?? '',
+      }) : null,
     };
   }) : results;
   const report = JSON.stringify({
@@ -592,7 +598,7 @@ async function main(): Promise<void> {
   }, null, 2);
   const outputFile = arg('output-file', '');
   if (outputFile) writeFileSync(outputFile, `${report}\n`, { encoding: 'utf8', mode: 0o600 });
-  else console.log(report);
+  console.log(report);
 }
 
 await main().catch((error) => {

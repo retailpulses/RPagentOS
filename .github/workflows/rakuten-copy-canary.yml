@@ -42,6 +42,9 @@ jobs:
       LISTING_COPY_MODEL: deepseek-chat
       LISTING_DEEPSEEK_TIMEOUT_MS: "120000"
       LISTING_DEEPSEEK_MAX_TOKENS: "1800"
+      WECOM_LISTING_COPY_WEBHOOK_URL: ${{ secrets.WECOM_LISTING_COPY_WEBHOOK_URL }}
+      COPY_REPORT_FILE: ${{ runner.temp }}/rakuten-copy-loop-report.json
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
       - name: Checkout released source
@@ -110,4 +113,13 @@ jobs:
           npx tsx src/jobs/run-generic-copy-canary.ts \
             "--mode=$LOOP_MODE" \
             "--limit=$LOOP_LIMIT" \
+            "--output-file=$COPY_REPORT_FILE" \
             --compact
+
+      - name: Send WeCom job report
+        if: ${{ always() }}
+        env:
+          LOOP_JOB_STATUS: ${{ job.status }}
+        run: |
+          npx tsx src/jobs/send-listing-copy-wecom-report.ts \
+            "--report-file=$COPY_REPORT_FILE"
