@@ -213,9 +213,13 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 - **Trigger:** `17 */2 * * *` UTC and bounded manual dispatch
 - **Access path:** PostgREST reads/audit rows plus revision-checked `internal_api` canonical writes
 - **Bounds:** one listing per scheduled invocation, five maximum for manual runs, concurrency one
-- **Selection:** deterministic opportunity score; `giga_generated` Rakuten drafts/enhanced only; hero, recently reviewed, evidence-poor, and strong-copy listings excluded
-- **Auto gate:** DeepSeek evidence audit passes, no specification conflict, original content preserved, deterministic weakness exists, commercial delta >= 10, confidence >= 0.90, shop allowlisted
+- **Selection:** deterministic opportunity score; `giga_generated` Rakuten drafts/enhanced only; hero, recently reviewed, and strong-copy listings excluded; evidence-poor or unsupported low-quality listings are tagged without an LLM call
+- **Disposition:** `auto_fixable`, `auto_updated`, or `needs_operator_review`; the latter includes durable reason codes and does not block later scheduled work
+- **Auto gate:** DeepSeek evidence audit passes, no specification conflict, original content preserved, an auto-fixable weakness (including `low_commercial_coverage`) exists, commercial delta >= 10, confidence >= 0.90, shop allowlisted
+- **Repair:** one evidence-constrained model retry using exact deterministic validation feedback; a second failure becomes `needs_operator_review`
 - **Operator approval:** optional; exceptions are skipped and audited, never held as a default gate
+- **Timeout/retry:** each PostgREST request has a 30-second abort timeout; model repair is bounded to one attempt; workflow timeout remains 15 minutes
+- **Request budget:** concurrency one; at most 50 database/internal API and LLM requests per invocation; catalog data is fetched in bounded bulk queries before the per-listing model loop
 - **Kill switch:** set `COPY_IMPROVEMENT_ENABLED` to any value other than exact `true`, disable `.github/workflows/rakuten-copy-canary.yml`, or clear the shop allowlist
 - **Credential class:** server-side service role for bounded reads/audit plus dedicated internal API bearer token for revision-checked writes
 - **Rollback:** disable the workflow; restore an affected listing through the existing revisioned catalog lifecycle path using its prior audit snapshot

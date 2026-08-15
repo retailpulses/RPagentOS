@@ -78,10 +78,18 @@ export function buildWecomCopyReport(input: {
   } else {
     lines.push(
       `- Mode: ${textValue(report.mode)}`,
-      `- Selected: ${numberValue(report.selected)} | Safety passed: ${numberValue(report.safetyPassed)} | Auto eligible: ${numberValue(report.autoEligible)}`,
+      `- Low quality found: ${numberValue(report.lowQualityFound ?? report.selected)} | Sent to pipeline: ${numberValue(report.sentToPipeline ?? report.selected)}`,
+      `- Safety passed: ${numberValue(report.safetyPassed)} | Auto eligible: ${numberValue(report.autoEligible)} | Needs operator review: ${numberValue(report.needsOperatorReview)}`,
+      `- Auto eligibility/update rate: ${(numberValue(report.autoEligibilityRate) * 100).toFixed(1)}% / ${(numberValue(report.autoUpdateRate) * 100).toFixed(1)}%`,
       `- Canonical applied: ${numberValue(report.canonicalApplied)} | Skipped/stale/failed: ${numberValue(report.selected) - numberValue(report.canonicalApplied)}/${numberValue(report.stale)}/${numberValue(report.applyFailed)}`,
-      `- Runtime: ${(numberValue(report.runtimeMs) / 1000).toFixed(1)}s | LLM requests: ${numberValue(report.llmRequests)}`,
+      `- Runtime: ${(numberValue(report.runtimeMs) / 1000).toFixed(1)}s | LLM requests: ${numberValue(report.llmRequests)} | Repair attempts: ${numberValue(report.modelRepairAttempts)}`,
     );
+    const reasonCounts = report.operatorReviewReasonCounts && typeof report.operatorReviewReasonCounts === 'object'
+      ? report.operatorReviewReasonCounts as Record<string, unknown> : {};
+    const reasons = Object.entries(reasonCounts)
+      .filter(([, count]) => numberValue(count) > 0)
+      .map(([reason, count]) => `${reason}: ${numberValue(count)}`);
+    if (reasons.length > 0) lines.push(`- Operator review reasons: ${reasons.join(' | ')}`);
     const results = Array.isArray(report.results) ? report.results : [];
     for (const raw of results.slice(0, 5)) {
       if (!raw || typeof raw !== 'object') continue;
@@ -91,8 +99,12 @@ export function buildWecomCopyReport(input: {
       lines.push(
         '',
         `### Listing ${textValue(result.listingId)}`,
-        `- Outcome: ${textValue(result.applyOutcome, 'not_applied')} | Opportunity: ${numberValue(result.opportunityScore)} | Commercial Δ: ${numberValue(result.commercialDelta)} | Confidence: ${numberValue(result.confidence).toFixed(2)}`,
+        `- Outcome: ${textValue(result.applyOutcome, 'not_applied')} | Disposition: ${textValue(result.disposition)}`,
+        `- Opportunity: ${numberValue(result.opportunityScore)} | Commercial Δ: ${numberValue(result.commercialDelta)} | Confidence: ${numberValue(result.confidence).toFixed(2)}`,
       );
+      const reviewReasons = Array.isArray(result.operatorReviewReasons)
+        ? result.operatorReviewReasons.filter((reason): reason is string => typeof reason === 'string') : [];
+      if (reviewReasons.length > 0) lines.push(`- Needs operator review: ${reviewReasons.join(', ')}`);
       if (diff.titleChanged === true) {
         lines.push(`- Title − ${textValue(diff.beforeTitle, '')}`, `- Title + ${textValue(diff.afterTitle, '')}`);
       } else {

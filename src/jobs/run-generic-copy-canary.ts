@@ -26,6 +26,12 @@ import {
 } from '../packages/listing-copy/preserve-first-enrich.js';
 import { calculateCopyOpportunity } from '../packages/listing-copy/opportunity-score.js';
 import { buildListingCopyDiff } from '../packages/listing-copy/wecom-report.js';
+import {
+  classifyListingCopyPreflight,
+  operatorReviewReasons,
+  repairInstructions,
+  type OperatorReviewReason,
+} from '../packages/listing-copy/loop-disposition.js';
 
 interface CanaryListing {
   id: string;
@@ -40,6 +46,7 @@ interface CanaryListing {
   contentRevision: number;
   opportunityScore: number;
   opportunityReasons: string[];
+  evidenceFactCount: number;
 }
 
 interface AuditedClaim {
@@ -65,6 +72,12 @@ function copyContainsClaim(copy: string, claim: string): boolean {
 }
 
 let llmRequestCount = 0;
+const DATABASE_REQUEST_TIMEOUT_MS = 30_000;
+const LIVE_PROMPT_VERSION = 'generic-v3-live';
+
+function databaseAbortSignal(): AbortSignal {
+  return AbortSignal.timeout(DATABASE_REQUEST_TIMEOUT_MS);
+}
 
 function arg(name: string, fallback: string): string {
   const prefix = `--${name}=`;
@@ -126,12 +139,14 @@ async function fetchLowQualityListings(
     .in('lifecycle_stage', ['draft', 'enhanced'])
     .eq('content_origin', 'giga_generated')
     .order('updated_at', { ascending: false })
-      .limit(100),
+      .limit(100)
+      .abortSignal(databaseAbortSignal()),
     supabase.from('listing_qwen_reviews')
       .select('structured_output')
       .eq('prompt_profile', 'rakuten_preserve_first_structured_enrich')
       .gte('created_at', cooldownSince)
-      .limit(1000),
+      .limit(1000)
+      .abortSignal(databaseAbortSignal()),
   ]);
   if (listingResult.error) throw new Error(`Fetch listings: ${listingResult.error.message}`);
   if (recentReviewResult.error) throw new Error(`Fetch recent live copy audits: ${recentReviewResult.error.message}`);
@@ -148,7 +163,8 @@ async function fetchLowQualityListings(
     .select('listing_id,product_spu_id,variant_id,confidence')
     .in('listing_id', rows.map((row) => row.id))
     .not('product_spu_id', 'is', null)
-    .order('confidence', { ascending: false });
+    .order('confidence', { ascending: false })
+    .abortSignal(databaseAbortSignal());
   if (linksResult.error) throw new Error(`Fetch links: ${linksResult.error.message}`);
   const spuByListing = new Map<string, string>();
   const variantIdsByListing = new Map<string, Set<string>>();
@@ -165,16 +181,19 @@ async function fetchLowQualityListings(
   const linkedRows = rows.filter((row) => spuByListing.has(row.id));
   const candidateSpuIds = [...new Set(linkedRows.map((row) => spuByListing.get(row.id)!))];
   const [spuResult, variantResult, heroResult] = await Promise.all([
-    supabase.from('product_spus').select('id,spu_code,title,category').in('id', candidateSpuIds),
+    supabase.from('product_spus').select('id,spu_code,title,category').in('id', candidateSpuIds)
+      .abortSignal(databaseAbortSignal()),
     supabase.from('product_variants')
       .select('id,product_spu_id,item_code,raw_payload')
       .in('product_spu_id', candidateSpuIds)
-      .limit(2500),
+      .limit(2500)
+      .abortSignal(databaseAbortSignal()),
     supabase.from('merchandising_focus_items')
       .select('product_spu_id')
       .in('product_spu_id', candidateSpuIds)
       .eq('focus_type', 'hero')
-      .eq('status', 'active'),
+      .eq('status', 'active')
+      .abortSignal(databaseAbortSignal()),
   ]);
   if (spuResult.error) throw new Error(`Fetch SPUs: ${spuResult.error.message}`);
   if (variantResult.error) throw new Error(`Fetch variants: ${variantResult.error.message}`);
@@ -201,7 +220,6 @@ async function fetchLowQualityListings(
       categoryId: row.category_id, categoryName: row.category_name,
       productSpu, spuVariants: children,
     });
-    if (profile.evidenceFacts.length < 3) continue;
     const beforeScore = evaluateGenericCommercialQuality({
       title: row.title!, description: row.description!,
     }, profile);
@@ -216,6 +234,7 @@ async function fetchLowQualityListings(
       contentRevision: typeof row.content_revision === 'number' ? row.content_revision : 1,
       opportunityScore: opportunity.score,
       opportunityReasons: opportunity.reasons,
+      evidenceFactCount: profile.evidenceFacts.length,
     });
   }
   const selected = candidates
@@ -229,8 +248,12 @@ async function fetchLowQualityListings(
   };
 }
 
-function generationPrompt(listing: CanaryListing, profile: GenericCopyProfile): string {
-  return [
+function generationPrompt(
+  listing: CanaryListing,
+  profile: GenericCopyProfile,
+  retryInstructions: string[] = [],
+): string {
+  const prompt = [
     'You are a senior Japanese Rakuten ecommerce copywriter.',
     'Use a preserve-first structured enrichment strategy. Do not rewrite or summarize the current title or description.',
     'Write only new Japanese content that is missing from the current description, organized under the five required standard headings.',
@@ -251,7 +274,14 @@ function generationPrompt(listing: CanaryListing, profile: GenericCopyProfile): 
     })}`,
     `First-party evidence: ${JSON.stringify(profile.evidenceFacts)}`,
     'Required JSON shape: {"title":null,"description":"【商品概要】...\\n【特徴・ベネフィット】...\\n【商品仕様】...\\n【使用シーン・おすすめ】...\\n【お手入れ・注意事項】...","confidence":0.0,"rationale":"...","hard_claims":[{"text":"...","evidence_ids":["..."]}]}',
-  ].join('\n');
+  ];
+  if (retryInstructions.length > 0) prompt.push(
+    '',
+    'REPAIR ATTEMPT: The previous proposal failed deterministic automatic-update gates.',
+    ...retryInstructions.map((instruction) => `- ${instruction}`),
+    'Return a corrected proposal, not an explanation.',
+  );
+  return prompt.join('\n');
 }
 
 function auditPrompt(copy: { title: string; description: string }, profile: GenericCopyProfile): string {
@@ -266,13 +296,32 @@ function auditPrompt(copy: { title: string; description: string }, profile: Gene
   ].join('\n');
 }
 
-async function runOne(listing: CanaryListing, apiKey: string, model: string): Promise<Record<string, unknown>> {
+function exactRepairFeedback(result: Record<string, unknown>): string[] {
+  const feedback: string[] = [];
+  const safetyErrors = Array.isArray(result.safetyErrors)
+    ? result.safetyErrors.filter((error): error is string => typeof error === 'string').slice(0, 8) : [];
+  if (safetyErrors.length > 0) feedback.push(`Exact validation errors: ${JSON.stringify(safetyErrors)}`);
+  const enrichment = result.enrichmentEvaluation && typeof result.enrichmentEvaluation === 'object' &&
+    !Array.isArray(result.enrichmentEvaluation)
+    ? result.enrichmentEvaluation as Record<string, unknown> : null;
+  const conflicts = Array.isArray(enrichment?.specificationConflicts)
+    ? enrichment.specificationConflicts.slice(0, 8) : [];
+  if (conflicts.length > 0) feedback.push(`Exact specification conflicts: ${JSON.stringify(conflicts)}`);
+  return feedback;
+}
+
+async function runOne(
+  listing: CanaryListing,
+  apiKey: string,
+  model: string,
+  retryInstructions: string[] = [],
+): Promise<Record<string, unknown>> {
   const profile = buildGenericCopyProfile({
     categoryId: listing.categoryId,
     categoryName: listing.categoryName || (typeof listing.productSpu.category === 'string' ? listing.productSpu.category : null),
     productSpu: listing.productSpu, spuVariants: listing.variants,
   });
-  const raw = await callJsonDeepSeek(generationPrompt(listing, profile), apiKey, model);
+  const raw = await callJsonDeepSeek(generationPrompt(listing, profile, retryInstructions), apiKey, model);
   const parsed = parseProposalFromLLM(JSON.stringify(raw));
   if (!parsed.proposal?.description) throw new Error(parsed.errors.join('; ') || 'missing enrichment block');
   const enrichmentProposal = { ...parsed.proposal, title: null };
@@ -380,6 +429,31 @@ function contentHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function structuredAuditOutput(
+  listing: CanaryListing,
+  result: Record<string, unknown>,
+  outcome: string,
+  contentRevision: number | null = null,
+): Record<string, unknown> {
+  return {
+    kind: 'listing_copy_live', listing_id: listing.id,
+    opportunity_score: listing.opportunityScore,
+    opportunity_reasons: listing.opportunityReasons,
+    preflight_disposition: result.preflightDisposition ?? null,
+    disposition: result.disposition ?? 'needs_operator_review',
+    operator_review_reasons: result.operatorReviewReasons ?? [],
+    llm_invoked: result.llmInvoked === true,
+    model_attempts: result.modelAttempts ?? 0,
+    model_repair_attempts: result.modelRepairAttempts ?? 0,
+    safety_passed: result.safetyPassed === true,
+    commercial_delta: result.commercialDelta ?? null,
+    eligible: result.autoEligible === true,
+    apply_outcome: outcome,
+    applied_content_revision: contentRevision,
+    enrichment_evaluation: result.enrichmentEvaluation ?? null,
+  };
+}
+
 async function persistLiveAudit(
   listing: CanaryListing,
   result: Record<string, unknown>,
@@ -390,41 +464,40 @@ async function persistLiveAudit(
     ? result.proposed as Record<string, unknown> : null;
   const confidence = typeof proposed?.confidence === 'number' ? proposed.confidence : null;
   const validationErrors = Array.isArray(result.safetyErrors) ? result.safetyErrors : [];
+  const llmInvoked = result.llmInvoked === true;
+  const modelRepairAttempts = typeof result.modelRepairAttempts === 'number' ? result.modelRepairAttempts : 0;
   const { data, error } = await supabase.from('listing_qwen_reviews').insert({
-    llm_provider: 'deepseek',
-    llm_runtime: 'deepseek_api',
-    llm_model: model,
+    llm_provider: llmInvoked ? 'deepseek' : 'deterministic',
+    llm_runtime: llmInvoked ? 'deepseek_api' : 'preflight_rules',
+    llm_model: llmInvoked ? model : 'listing-copy-preflight-v1',
     prompt_profile: 'rakuten_preserve_first_structured_enrich',
-    prompt_version: 'generic-v2-live',
+    prompt_version: LIVE_PROMPT_VERSION,
     input_hash: contentHash({ listingId: listing.id, revision: listing.contentRevision, title: listing.title, description: listing.description }),
     output_hash: contentHash(proposed),
     source_snapshot_hash: contentHash({ title: listing.title, description: listing.description }),
     source_snapshot_version: listing.contentRevision,
     risk_level: autoEligible ? 'low' : 'medium',
     confidence,
-    summary: typeof proposed?.rationale === 'string' ? proposed.rationale : 'DeepSeek live copy loop evaluation',
+    summary: typeof proposed?.rationale === 'string' ? proposed.rationale
+      : result.disposition === 'needs_operator_review'
+        ? 'Low-quality listing needs optional operator review'
+        : 'DeepSeek live copy loop evaluation',
     issues: validationErrors,
     recommendations: [],
     suggested_title: typeof proposed?.title === 'string' ? proposed.title : null,
     suggested_description: typeof proposed?.description === 'string' ? proposed.description : null,
-    structured_output: {
-      kind: 'listing_copy_live', listing_id: listing.id,
-      opportunity_score: listing.opportunityScore,
-      opportunity_reasons: listing.opportunityReasons,
-      safety_passed: result.safetyPassed === true,
-      commercial_delta: result.commercialDelta ?? null,
-      eligible: autoEligible,
-      apply_outcome: 'pending',
-      enrichment_evaluation: result.enrichmentEvaluation ?? null,
-    },
-    raw_request: { evidence_fact_count: result.evidenceFactCount ?? null },
+    structured_output: structuredAuditOutput(
+      listing, result, typeof result.applyOutcome === 'string' ? result.applyOutcome : 'pending',
+    ),
+    raw_request: { evidence_fact_count: result.evidenceFactCount ?? listing.evidenceFactCount, llm_invoked: llmInvoked },
     raw_response: {},
-    validation_status: autoEligible ? 'valid' : 'invalid',
+    validation_status: autoEligible ? (modelRepairAttempts > 0 ? 'repaired' : 'valid')
+      : typeof result.error === 'string' && result.error ? 'failed' : 'invalid',
     validation_errors: validationErrors,
-    repair_attempts: result.deterministicRepair && typeof result.deterministicRepair === 'object' &&
-      (result.deterministicRepair as Record<string, unknown>).changed === true ? 1 : 0,
+    repair_attempts: modelRepairAttempts + (result.deterministicRepair && typeof result.deterministicRepair === 'object' &&
+      (result.deterministicRepair as Record<string, unknown>).changed === true ? 1 : 0),
     error_message: typeof result.error === 'string' ? result.error : null,
-  }).select('id').single();
+  }).select('id').abortSignal(databaseAbortSignal()).single();
   if (error) throw new Error(`Persist live copy audit: ${error.message}`);
   return String(data.id);
 }
@@ -437,18 +510,8 @@ async function recordApplyOutcome(
   contentRevision: number | null,
 ): Promise<void> {
   const { error } = await supabase.from('listing_qwen_reviews').update({
-    structured_output: {
-      kind: 'listing_copy_live', listing_id: listing.id,
-      opportunity_score: listing.opportunityScore,
-      opportunity_reasons: listing.opportunityReasons,
-      safety_passed: result.safetyPassed === true,
-      commercial_delta: result.commercialDelta ?? null,
-      eligible: result.autoEligible === true,
-      apply_outcome: outcome,
-      applied_content_revision: contentRevision,
-      enrichment_evaluation: result.enrichmentEvaluation ?? null,
-    },
-  }).eq('id', reviewId);
+    structured_output: structuredAuditOutput(listing, result, outcome, contentRevision),
+  }).eq('id', reviewId).abortSignal(databaseAbortSignal());
   if (error) throw new Error(`Update live copy audit: ${error.message}`);
 }
 
@@ -495,25 +558,81 @@ async function main(): Promise<void> {
   let applied = 0;
   let stale = 0;
   let applyFailed = 0;
+  let pipelineFailed = 0;
   for (const listing of selection.listings) {
     let result: Record<string, unknown>;
+    const shopEnabled = mode === 'dry_run' || autoShops.has(listing.shopCode);
+    const preflight = classifyListingCopyPreflight({
+      opportunityReasons: listing.opportunityReasons,
+      evidenceFactCount: listing.evidenceFactCount,
+      shopEnabled,
+    });
+    if (preflight.disposition === 'needs_operator_review') {
+      result = {
+        listingId: listing.id, shopCode: listing.shopCode, productSpuId: listing.productSpuId,
+        spuCode: listing.productSpu.spu_code ?? null,
+        opportunityScore: listing.opportunityScore,
+        opportunityReasons: listing.opportunityReasons,
+        evidenceFactCount: listing.evidenceFactCount,
+        preflightDisposition: preflight.disposition,
+        disposition: 'needs_operator_review',
+        operatorReviewReasons: preflight.reasons,
+        llmInvoked: false, modelAttempts: 0, modelRepairAttempts: 0,
+        safetyPassed: null, commercialDelta: null, autoEligible: false,
+        applyOutcome: mode === 'auto' ? 'skipped_preflight' : 'dry_run',
+      };
+    } else {
+      try {
+        result = await runOne(listing, apiKey, model);
+        let reviewReasons = operatorReviewReasons({
+          result, opportunityReasons: listing.opportunityReasons,
+          minimumCommercialDelta, confidenceThreshold, shopEnabled,
+        });
+        let modelAttempts = 1;
+        let modelRepairAttempts = 0;
+        const instructions = [...repairInstructions(reviewReasons), ...exactRepairFeedback(result)];
+        if (reviewReasons.length > 0 && instructions.length > 0) {
+          result = await runOne(listing, apiKey, model, instructions);
+          modelAttempts++;
+          modelRepairAttempts++;
+          reviewReasons = operatorReviewReasons({
+            result, opportunityReasons: listing.opportunityReasons,
+            minimumCommercialDelta, confidenceThreshold, shopEnabled,
+          });
+        }
+        result.preflightDisposition = 'auto_fixable';
+        result.disposition = reviewReasons.length === 0 ? 'auto_fixable' : 'needs_operator_review';
+        result.operatorReviewReasons = reviewReasons;
+        result.llmInvoked = true;
+        result.modelAttempts = modelAttempts;
+        result.modelRepairAttempts = modelRepairAttempts;
+        result.autoEligible = reviewReasons.length === 0;
+        result.applyOutcome = mode === 'auto' ? 'skipped' : 'dry_run';
+      } catch (error) {
+        pipelineFailed++;
+        result = {
+          listingId: listing.id, shopCode: listing.shopCode, productSpuId: listing.productSpuId,
+          spuCode: listing.productSpu.spu_code ?? null,
+          opportunityScore: listing.opportunityScore,
+          opportunityReasons: listing.opportunityReasons,
+          evidenceFactCount: listing.evidenceFactCount,
+          preflightDisposition: 'auto_fixable', disposition: 'needs_operator_review',
+          operatorReviewReasons: ['pipeline_error'] satisfies OperatorReviewReason[],
+          llmInvoked: true, modelAttempts: 1, modelRepairAttempts: 0,
+          safetyPassed: false, commercialDelta: null, autoEligible: false,
+          applyOutcome: mode === 'auto' ? 'pipeline_failed' : 'dry_run',
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    let reviewId: string | null = null;
     try {
-      result = await runOne(listing, apiKey, model);
       const proposed = result.proposed && typeof result.proposed === 'object'
         ? result.proposed as Record<string, unknown> : null;
-      const confidence = typeof proposed?.confidence === 'number' ? proposed.confidence : 0;
-      const hasDeterministicWeakness = listing.opportunityReasons.some((reason) =>
-        ['short_title', 'short_description', 'weak_structure', 'thin_information'].includes(reason),
-      );
-      const autoEligible = result.eligible === true &&
-        typeof result.commercialDelta === 'number' && result.commercialDelta >= minimumCommercialDelta &&
-        hasDeterministicWeakness && confidence >= confidenceThreshold && autoShops.has(listing.shopCode);
-      result.autoEligible = autoEligible;
-      result.applyOutcome = mode === 'auto' ? 'skipped' : 'dry_run';
       if (mode === 'auto') {
-        const reviewId = await persistLiveAudit(listing, result, model, autoEligible);
+        reviewId = await persistLiveAudit(listing, result, model, result.autoEligible === true);
         databaseRequests++;
-        if (autoEligible && proposed) {
+        if (result.autoEligible === true && proposed) {
           const proposalHash = contentHash(proposed);
           const outcome = await applyContentUpdate({
             listingId: listing.id,
@@ -522,14 +641,23 @@ async function main(): Promise<void> {
             expectedRevision: listing.contentRevision,
             idempotencyKey: idempotencyKey(listing.id, proposalHash),
             model,
-            promptVersion: 'generic-v2-live',
+            promptVersion: LIVE_PROMPT_VERSION,
           }, internalApiUrl, internalApiToken, fetch);
           databaseRequests++;
           result.applyOutcome = outcome.outcome;
           result.appliedContentRevision = outcome.contentRevision;
-          if (outcome.outcome === 'updated' || outcome.outcome === 'replay') applied++;
-          else if (outcome.outcome === 'stale_revision') stale++;
-          else applyFailed++;
+          if (outcome.outcome === 'updated' || outcome.outcome === 'replay') {
+            applied++;
+            result.disposition = 'auto_updated';
+          } else if (outcome.outcome === 'stale_revision') {
+            stale++;
+            result.disposition = 'needs_operator_review';
+            result.operatorReviewReasons = ['stale_revision'] satisfies OperatorReviewReason[];
+          } else {
+            applyFailed++;
+            result.disposition = 'needs_operator_review';
+            result.operatorReviewReasons = ['canonical_apply_failed'] satisfies OperatorReviewReason[];
+          }
         }
         await recordApplyOutcome(
           reviewId, listing, result, String(result.applyOutcome),
@@ -538,19 +666,24 @@ async function main(): Promise<void> {
         databaseRequests++;
       }
     } catch (error) {
-      result = {
-        listingId: listing.id, shopCode: listing.shopCode, productSpuId: listing.productSpuId,
-        spuCode: listing.productSpu.spu_code ?? null,
-        opportunityScore: listing.opportunityScore,
-        opportunityReasons: listing.opportunityReasons,
-        safetyPassed: false, commercialDelta: null,
-        error: error instanceof Error ? error.message : String(error),
-      };
-      applyFailed += mode === 'auto' ? 1 : 0;
+      applyFailed++;
+      result.disposition = 'needs_operator_review';
+      result.operatorReviewReasons = ['canonical_apply_failed'] satisfies OperatorReviewReason[];
+      result.applyOutcome = 'apply_failed';
+      result.error = error instanceof Error ? error.message : String(error);
+      if (reviewId) {
+        try {
+          await recordApplyOutcome(reviewId, listing, result, 'apply_failed', null);
+          databaseRequests++;
+        } catch {
+          // The original failure remains in the run report when audit finalization also fails.
+        }
+      }
     }
     results.push(result);
   }
-  const passed = results.filter((result) => result.safetyPassed === true);
+  const modelResults = results.filter((result) => result.llmInvoked === true);
+  const passed = modelResults.filter((result) => result.safetyPassed === true);
   const compact = process.argv.includes('--compact');
   const outputResults = compact ? results.map((result) => {
     const before = result.before as { title?: string; description?: string } | undefined;
@@ -562,6 +695,12 @@ async function main(): Promise<void> {
       categoryId: result.categoryId, categoryName: result.categoryName,
       opportunityScore: result.opportunityScore, opportunityReasons: result.opportunityReasons,
       evidenceFactCount: result.evidenceFactCount,
+      preflightDisposition: result.preflightDisposition,
+      disposition: result.disposition,
+      operatorReviewReasons: result.operatorReviewReasons,
+      llmInvoked: result.llmInvoked,
+      modelAttempts: result.modelAttempts,
+      modelRepairAttempts: result.modelRepairAttempts,
       before: { title: before?.title ?? null, descriptionExcerpt: plainText(before?.description ?? '', 500) },
       proposed: { title: proposed?.title ?? null, description: proposed?.description ?? null, rationale: proposed?.rationale ?? null },
       confidence: proposed?.confidence ?? null,
@@ -588,11 +727,23 @@ async function main(): Promise<void> {
     requested: limit, selected: selection.listings.length,
     provider: 'deepseek', model, databaseRequests,
     rowsRead: selection.rowsRead, llmRequests: llmRequestCount,
-    safetyPassed: passed.length, safetyFailed: results.length - passed.length,
+    lowQualityFound: selection.listings.length,
+    sentToPipeline: modelResults.length,
+    preflightAutoFixable: results.filter((result) => result.preflightDisposition === 'auto_fixable').length,
+    needsOperatorReview: results.filter((result) => result.disposition === 'needs_operator_review').length,
+    autoEligibilityRate: modelResults.length > 0
+      ? results.filter((result) => result.autoEligible === true).length / modelResults.length : 0,
+    autoUpdateRate: modelResults.length > 0 ? applied / modelResults.length : 0,
+    operatorReviewReasonCounts: results.flatMap((result) => Array.isArray(result.operatorReviewReasons)
+      ? result.operatorReviewReasons.filter((reason): reason is string => typeof reason === 'string') : [])
+      .reduce<Record<string, number>>((counts, reason) => ({ ...counts, [reason]: (counts[reason] ?? 0) + 1 }), {}),
+    modelRepairAttempts: results.reduce((sum, result) => sum +
+      (typeof result.modelRepairAttempts === 'number' ? result.modelRepairAttempts : 0), 0),
+    safetyPassed: passed.length, safetyFailed: modelResults.length - passed.length,
     commerciallyImproved: results.filter((result) => typeof result.commercialDelta === 'number' && result.commercialDelta > 0).length,
     eligible: results.filter((result) => result.eligible === true).length,
     autoEligible: results.filter((result) => result.autoEligible === true).length,
-    canonicalApplied: applied, stale, applyFailed,
+    canonicalApplied: applied, stale, applyFailed, pipelineFailed,
     operatorConfirmationRequired: 0,
     runtimeMs: Date.now() - startedAt, results: outputResults,
   }, null, 2);
