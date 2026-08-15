@@ -18,11 +18,14 @@ test('formats a bounded WeCom job report', () => {
   const content = buildWecomCopyReport({
     jobStatus: 'success', runUrl: 'https://example.test/run/1',
     report: {
-      mode: 'auto', selected: 1, safetyPassed: 1, autoEligible: 1,
-      canonicalApplied: 1, stale: 0, applyFailed: 0, runtimeMs: 12345, llmRequests: 2,
+      mode: 'auto', selected: 1, lowQualityFound: 1, sentToPipeline: 1,
+      safetyPassed: 1, autoEligible: 1, needsOperatorReview: 0,
+      autoEligibilityRate: 1, autoUpdateRate: 1,
+      canonicalApplied: 1, stale: 0, applyFailed: 0, runtimeMs: 12345,
+      llmRequests: 2, modelRepairAttempts: 0,
       results: [{
         listingId: 'listing-1', applyOutcome: 'updated', opportunityScore: 88,
-        commercialDelta: 18, confidence: 0.9,
+        disposition: 'auto_updated', commercialDelta: 18, confidence: 0.9,
         diff: {
           titleChanged: false, beforeDescriptionLength: 20, afterDescriptionLength: 200,
           addedLines: ['追加行'], removedLines: [],
@@ -31,7 +34,28 @@ test('formats a bounded WeCom job report', () => {
     },
   });
   assert.match(content, /canonical updated/);
+  assert.match(content, /Low quality found: 1 \| Sent to pipeline: 1/);
+  assert.match(content, /Auto eligibility\/update rate: 100\.0% \/ 100\.0%/);
   assert.match(content, /Description: 20 → 200 chars/);
   assert.match(content, /\+ 追加行/);
   assert.ok(Buffer.byteLength(content, 'utf8') <= 3800);
+});
+
+test('reports optional operator-review reasons', () => {
+  const content = buildWecomCopyReport({
+    jobStatus: 'success',
+    report: {
+      mode: 'auto', selected: 1, lowQualityFound: 1, sentToPipeline: 1,
+      safetyPassed: 1, autoEligible: 0, needsOperatorReview: 1,
+      canonicalApplied: 0, stale: 0, applyFailed: 0, runtimeMs: 1000,
+      llmRequests: 4, modelRepairAttempts: 1,
+      operatorReviewReasonCounts: { specification_conflict: 1 },
+      results: [{
+        listingId: 'listing-2', disposition: 'needs_operator_review', applyOutcome: 'skipped',
+        operatorReviewReasons: ['specification_conflict'],
+      }],
+    },
+  });
+  assert.match(content, /Needs operator review: specification_conflict/);
+  assert.match(content, /Repair attempts: 1/);
 });
