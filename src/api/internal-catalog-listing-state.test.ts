@@ -39,7 +39,7 @@ function mockFullFetch(opts: {
     variant_id: string | null;
     listing_status: string | null;
     raw_payload?: Record<string, unknown> | null;
-    external_listing_id?: string;
+    external_listing_id?: string | null;
     platform?: string;
     shop_code?: string;
   }>;
@@ -75,7 +75,7 @@ function mockFullFetch(opts: {
     if (url.includes('/platform_listings?')) {
       return Response.json((opts.listings ?? []).map((l) => ({
         ...l,
-        external_listing_id: l.external_listing_id ?? 'mercari-prod-1',
+        external_listing_id: l.external_listing_id === undefined ? 'mercari-prod-1' : l.external_listing_id,
         platform: l.platform ?? 'mercari',
         shop_code: l.shop_code ?? 'shop1',
       })));
@@ -474,7 +474,7 @@ test('creates a new UNOPENED listing with both table writes', async () => {
         return Response.json(rows.map((row) => ({ id: 'sku-new-id', ...row })));
       }
       if (init?.method === 'POST' && url.includes('/platform_listings')) {
-        assert.match(url, /on_conflict=platform%2Cshop_code%2Cexternal_listing_id/);
+        assert.match(url, /on_conflict=platform%2Cshop_code%2Cvariant_id/);
         const rows = JSON.parse(init.body as string) as Array<Record<string, unknown>>;
         writtenListings.push(...rows);
         return Response.json(rows.map((row) => ({ id: 'listing-new-id', ...row })));
@@ -661,7 +661,7 @@ test('results follow input order mixing successes and failures', async () => {
     request({
       updates: [
         validUpdate({ idempotency_key: 'k1', external_listing_id: 'ext-1', item_code: 'MISSING' }),
-        validUpdate({ idempotency_key: 'k2', external_listing_id: 'ext-2' }),
+        validUpdate({ idempotency_key: 'k2', external_listing_id: 'ext-2', item_code: 'N511P407695W-NEW' }),
         validUpdate({ idempotency_key: 'k3', external_listing_id: 'ext-3', listing_status: 'OPENED' }),
       ],
     }),
@@ -669,6 +669,7 @@ test('results follow input order mixing successes and failures', async () => {
     mockFullFetch({
       variants: [
         { id: 'v2', item_code: 'N511P407695W' },
+        { id: 'v-new', item_code: 'N511P407695W-NEW' },
       ],
       listings: [{
         id: 'listing-3',
@@ -1000,4 +1001,104 @@ test('rejects null body', async () => {
   });
   const response = await handleListingStateBatch(req, env);
   assert.equal(response.status, 400);
+});
+
+test('grain fallback updates a draft with NULL external_listing_id instead of re-inserting', async () => {
+  const response = await handleListingStateBatch(
+    request({ updates: [validUpdate({ external_listing_id: 'mercari-prod-2' })] }),
+    env,
+    mockFullFetch({
+      variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+      listings: [{
+        id: 'listing-draft-1',
+        variant_id: 'v1',
+        listing_status: 'unknown',
+        external_listing_id: null,
+        platform: 'mercari',
+        shop_code: 'shop1',
+      }],
+      skus: [],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].result, 'updated');
+  assert.equal(body.results[0].error, undefined);
+});
+
+test('grain fallback refuses to overwrite a different external_listing_id', async () => {
+  const response = await handleListingStateBatch(
+    request({ updates: [validUpdate({ external_listing_id: 'mercari-prod-2' })] }),
+    env,
+    mockFullFetch({
+      variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+      listings: [{
+        id: 'listing-other-1',
+        variant_id: 'v1',
+        listing_status: 'OPENED',
+        external_listing_id: 'mercari-prod-OTHER',
+        platform: 'mercari',
+        shop_code: 'shop1',
+      }],
+      skus: [],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].error, 'identity_conflict');
+});
+
+test('same-request duplicate grain with different external ids yields identity_conflict for the second', async () => {
+  const response = await handleListingStateBatch(
+    request({
+      updates: [
+        validUpdate({ idempotency_key: 'k1', external_listing_id: 'ext-a' }),
+        validUpdate({ idempotency_key: 'k2', external_listing_id: 'ext-b' }),
+      ],
+    }),
+    env,
+    mockFullFetch({
+      variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+      listings: [{
+        id: 'listing-draft-1',
+        variant_id: 'v1',
+        listing_status: 'unknown',
+        external_listing_id: null,
+        platform: 'mercari',
+        shop_code: 'shop1',
+      }],
+      skus: [],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].result, 'updated');
+  assert.equal(body.results[1].error, 'identity_conflict');
+});
+
+test('primary-hit published row is unaffected by grain fallback and returns updated', async () => {
+  const response = await handleListingStateBatch(
+    request({ updates: [validUpdate({ external_listing_id: 'mercari-prod-1', listing_status: 'OPENED' })] }),
+    env,
+    mockFullFetch({
+      variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+      listings: [{
+        id: 'listing-1',
+        variant_id: 'v1',
+        listing_status: 'UNOPENED',
+        external_listing_id: 'mercari-prod-1',
+        platform: 'mercari',
+        shop_code: 'shop1',
+      }],
+      skus: [{
+        listing_id: 'listing-1',
+        external_sku_id: 'mercari-sku-1',
+        sku_code: 'N511P407695W',
+      }],
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].result, 'updated');
+  assert.equal(body.results[0].error, undefined);
 });
