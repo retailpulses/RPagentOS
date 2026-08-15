@@ -1114,6 +1114,10 @@ function listingIdentity(platform: string, shopCode: string, extId: string): str
   return `${platform.toUpperCase()}|${shopCode.toUpperCase()}|${extId.toUpperCase()}`;
 }
 
+function listingGrainKey(platform: string, shopCode: string, variantId: string): string {
+  return `${platform.toUpperCase()}|${shopCode.toUpperCase()}|${variantId.toUpperCase()}`;
+}
+
 export async function handleListingStateBatch(
   request: Request,
   env: InternalCatalogEnv,
@@ -1212,6 +1216,7 @@ export async function handleListingStateBatch(
 
   let variantRows: unknown[];
   let listingRows: unknown[];
+  let grainListingRows: unknown[];
   let skuRows: unknown[];
 
   try {
@@ -1242,6 +1247,19 @@ export async function handleListingStateBatch(
     const matches = variantsByIdentity.get(key) ?? [];
     matches.push({ id: row.id, item_code: row.item_code });
     variantsByIdentity.set(key, matches);
+  }
+
+  // Canonical grain grouping (platform, shop_code, variant_id) for drafts that
+  // predate any external identity. Used to fall back to the existing row instead
+  // of re-inserting it (which would violate uq_platform_listings_grain).
+  const grainShopGroups = new Map<string, string[]>();
+  for (const update of parsedUpdates) {
+    const varMatches = variantsByIdentity.get(identityKey(update.item_code)) ?? [];
+    if (varMatches.length !== 1) continue;
+    const groupKey = `${update.platform}|${update.shop_code}`;
+    const variantIds = grainShopGroups.get(groupKey) ?? [];
+    variantIds.push(varMatches[0].id);
+    grainShopGroups.set(groupKey, variantIds);
   }
 
   const platformShopGroups = new Map<string, string[]>();
@@ -1277,6 +1295,31 @@ export async function handleListingStateBatch(
     return json({ error: 'catalog_upstream_error' }, 502);
   }
 
+  try {
+    grainListingRows = [];
+    for (const [groupKey, variantIds] of grainShopGroups.entries()) {
+      const [platform, shopCode] = groupKey.split('|');
+      const uniqueVariantIds = [...new Set(variantIds)];
+      for (const batch of chunks(uniqueVariantIds, 50)) {
+        grainListingRows.push(...await supabaseRows(
+          supabaseEnv,
+          'platform_listings',
+          {
+            select: 'id,variant_id,listing_status,raw_payload,external_listing_id,platform,shop_code',
+            platform: `eq.${platform}`,
+            shop_code: `eq.${shopCode}`,
+            variant_id: postgrestIn(batch),
+            limit: String(batch.length + 1),
+          },
+          fetchFn,
+        ));
+      }
+    }
+  } catch (error) {
+    console.error('listing-state grain listing lookup failed', error);
+    return json({ error: 'catalog_upstream_error' }, 502);
+  }
+
   const listingByIdentity = new Map<string, {
     id: string;
     variant_id: string | null;
@@ -1301,7 +1344,36 @@ export async function handleListingStateBatch(
     });
   }
 
-  const existingListingIds = [...listingByIdentity.values()].map((l) => l.id);
+  const listingByGrain = new Map<string, {
+    id: string;
+    variant_id: string | null;
+    listing_status: string | null;
+    raw_payload: Record<string, unknown> | null;
+    external_listing_id: string | null;
+  }>();
+
+  for (const value of grainListingRows) {
+    const row = value as Record<string, unknown>;
+    if (typeof row.id !== 'string') continue;
+    const grainKey = listingGrainKey(
+      typeof row.platform === 'string' ? row.platform : '',
+      typeof row.shop_code === 'string' ? row.shop_code : '',
+      typeof row.variant_id === 'string' ? row.variant_id : '',
+    );
+    listingByGrain.set(grainKey, {
+      id: row.id,
+      variant_id: typeof row.variant_id === 'string' ? row.variant_id : null,
+      listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
+      raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
+        ? row.raw_payload as Record<string, unknown> : null,
+      external_listing_id: typeof row.external_listing_id === 'string' ? row.external_listing_id : null,
+    });
+  }
+
+  const existingListingIds = [...new Set([
+    ...[...listingByIdentity.values()].map((l) => l.id),
+    ...[...listingByGrain.values()].map((l) => l.id),
+  ])];
   const listingIdToSkus = new Map<string, Array<{
     external_sku_id: string | null;
     sku_code: string | null;
@@ -1363,6 +1435,7 @@ export async function handleListingStateBatch(
 
   const toUpsert: UpsertEntry[] = [];
   const identityKeyByResultIndex = new Map<number, string>();
+  const grainToIdentity = new Map<string, string>();
 
   for (const update of parsedUpdates) {
     const identityVal = listingIdentity(update.platform, update.shop_code, update.external_listing_id);
@@ -1395,7 +1468,37 @@ export async function handleListingStateBatch(
     }
 
     const variantId = varMatches[0].id;
-    const existingListing = listingByIdentity.get(identityVal);
+    const grainKey = listingGrainKey(update.platform, update.shop_code, variantId);
+    const boundIdentity = grainToIdentity.get(grainKey);
+    if (boundIdentity !== undefined && boundIdentity !== update.external_listing_id.toUpperCase()) {
+      results[update.index] = {
+        platform: update.platform,
+        shop_code: update.shop_code,
+        external_listing_id: update.external_listing_id,
+        error: 'identity_conflict',
+      };
+      continue;
+    }
+    grainToIdentity.set(grainKey, update.external_listing_id.toUpperCase());
+
+    let existingListing = listingByIdentity.get(identityVal);
+
+    if (!existingListing) {
+      const grainRow = listingByGrain.get(listingGrainKey(update.platform, update.shop_code, variantId));
+      if (grainRow) {
+        const existingExtId = grainRow.external_listing_id;
+        if (existingExtId && existingExtId.toUpperCase() !== update.external_listing_id.toUpperCase()) {
+          results[update.index] = {
+            platform: update.platform,
+            shop_code: update.shop_code,
+            external_listing_id: update.external_listing_id,
+            error: 'identity_conflict',
+          };
+          continue;
+        }
+        existingListing = grainRow;
+      }
+    }
 
     if (existingListing) {
       if (existingListing.variant_id && existingListing.variant_id !== variantId) {
@@ -1561,7 +1664,7 @@ export async function handleListingStateBatch(
         'platform_listings',
         listingBody,
         fetchFn,
-        'platform,shop_code,external_listing_id',
+        'platform,shop_code,variant_id',
       );
     } catch (error) {
       console.error('listing-state listing upsert failed', error);
@@ -1617,7 +1720,8 @@ export async function handleListingStateBatch(
 
     for (const entry of toUpsert) {
       const identityVal = listingIdentity(entry.platform, entry.shop_code, entry.external_listing_id);
-      const existed = listingByIdentity.has(identityVal);
+      const existed = listingByIdentity.has(identityVal)
+        || listingByGrain.has(listingGrainKey(entry.platform, entry.shop_code, entry.variantId));
       results[entry.resultIndex] = {
         platform: entry.platform,
         shop_code: entry.shop_code,
