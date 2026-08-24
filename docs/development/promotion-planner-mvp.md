@@ -15,10 +15,15 @@ Time sale, Ads, and Campaign remain future promotion types.
 - Calendar-driven `5と0のつく日` planning is enabled for August 2026. The
   system deterministically seeds the August 25 plan in `publish_review` and
   lets an operator generate other August occurrences without duplicates.
-- The initial versioned template is an entire-order, store-only 5% discount
-  with 100 issues, one use per member, no combination, and `displayFlag: 0`.
-  These are review defaults and require operator confirmation of campaign
-  timing, margin, copy, limits, and issue timing.
+- The version 2 default template is an entire-order, store-only 5% discount
+  with no optional device, purchase amount, purchase quantity, member-use, or
+  member-rank restrictions. It is publicly displayed with `displayFlag: 1`;
+  only coupon combination remains disabled with `combineFlag: 0`.
+- CouponAPI requires a numeric `issueCount`, so the review default uses
+  `999999999` as a practical no-limit value. An operator must confirm that RMS
+  accepts this count before issue. The optional `memberAvailMaxCount` is omitted.
+- Customer-facing store copy uses the approved name `ホムブリス`; the internal
+  shop identifier remains `homebliss`.
 - No Supabase writes and no marketplace API calls.
 - “Submit for publish review” changes only the local plan status.
 - JSON export is available for review and downstream API-contract work.

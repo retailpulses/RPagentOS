@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildFiveZeroCouponPlan, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM, fiveZeroOccurrences, RAKUTEN_RMS_FIELD_LABELS, updateModeForCoupon, validateRakutenCouponForm, type RakutenCouponPlan } from './rakuten-coupon-model.js'
+import { buildFiveZeroCouponPlan, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM, fiveZeroOccurrences, isLegacyFiveZeroDefaultPlan, RAKUTEN_RMS_FIELD_LABELS, updateModeForCoupon, validateRakutenCouponForm, type RakutenCouponPlan } from './rakuten-coupon-model.js'
 
 const validForm = { ...EMPTY_RAKUTEN_COUPON_FORM, internalName: 'September coupon', couponName: '秋のお買い物10%OFF', couponCaption: '全品10%割引', couponStartDate: '2026-09-01T00:00', couponEndDate: '2026-09-30T23:59' }
 
 test('builds exact Rakuten CouponToIssue field names', () => {
   const payload = buildRakutenCouponPayload(validForm)
-  assert.equal(payload.issueCount, 100)
-  assert.equal(payload.memberAvailMaxCount, 1)
+  assert.equal(payload.issueCount, 999_999_999)
+  assert.equal('memberAvailMaxCount' in payload, false)
+  assert.equal('multiRankCond' in payload, false)
   assert.equal(payload.couponStartDate, '2026-09-01T00:00:00+09:00')
   assert.equal('couponIssueCount' in payload, false)
   assert.equal('memberMaxCount' in payload, false)
@@ -44,15 +45,21 @@ test('generates valid 5と0 occurrences without nonexistent calendar dates', () 
   ])
 })
 
-test('builds an idempotent hidden review payload for the August 25 occurrence', () => {
+test('builds an idempotent minimum-restriction review payload for the August 25 occurrence', () => {
   const generatedAt = '2026-08-24T00:00:00.000Z'
   const first = buildFiveZeroCouponPlan('2026-08-25', 'publish_review', generatedAt)
   const second = buildFiveZeroCouponPlan('2026-08-25', 'publish_review', generatedAt)
   assert.deepEqual(first, second)
-  assert.equal(first.id, 'homebliss:rakuten_5_and_0_day:2026-08-25:five_zero_storewide_percent:v1')
+  assert.equal(first.id, 'homebliss:rakuten_5_and_0_day:2026-08-25:five_zero_storewide_percent:v2')
   assert.equal(first.status, 'publish_review')
   assert.equal(first.coupon.discountFactor, 5)
-  assert.equal(first.coupon.displayFlag, 0)
+  assert.equal(first.coupon.couponCaption, 'ホムブリス店舗限定クーポン')
+  assert.equal(first.coupon.issueCount, 999_999_999)
+  assert.equal(first.coupon.displayFlag, 1)
+  assert.equal(first.coupon.combineFlag, 0)
+  assert.equal('memberAvailMaxCount' in first.coupon, false)
+  assert.equal('multiRankCond' in first.coupon, false)
+  assert.equal('otherConditions' in first.coupon, false)
   assert.equal(first.calendarGeneration?.requiresOperatorApproval, true)
   assert.deepEqual(validateRakutenCouponForm({ ...validForm, ...{
     internalName: first.internalName,
@@ -64,6 +71,26 @@ test('builds an idempotent hidden review payload for the August 25 occurrence', 
     discountFactor: String(first.coupon.discountFactor),
     displayFlag: first.coupon.displayFlag,
   } }), [])
+})
+
+test('recognizes only the untouched v1 seeded plan for safe browser migration', () => {
+  const current = buildFiveZeroCouponPlan('2026-08-25', 'publish_review', '2026-08-24T00:00:00.000Z')
+  const legacy: RakutenCouponPlan = {
+    ...current,
+    id: 'homebliss:rakuten_5_and_0_day:2026-08-25:five_zero_storewide_percent:v1',
+    coupon: {
+      ...current.coupon,
+      couponCaption: 'Home Bliss店舗限定クーポン',
+      issueCount: 100,
+      memberAvailMaxCount: 1,
+      multiRankCond: [0],
+      displayFlag: 0,
+    },
+    calendarGeneration: { ...current.calendarGeneration!, templateVersion: 1 },
+  }
+  assert.equal(isLegacyFiveZeroDefaultPlan(legacy, '2026-08-25'), true)
+  assert.equal(isLegacyFiveZeroDefaultPlan(current, '2026-08-25'), false)
+  assert.equal(isLegacyFiveZeroDefaultPlan({ ...legacy, coupon: { ...legacy.coupon, issueCount: 500 } }, '2026-08-25'), false)
 })
 
 test('rejects a non-5と0 date', () => {

@@ -116,7 +116,9 @@ Template key: `five_zero_storewide_percent`
 - `discountType: 2`
 - Percentage configured per shop/template version
 - `combineFlag: 0` by default
-- Configurable `issueCount` and `memberAvailMaxCount`
+- `issueCount: 999999999` as the review default because CouponAPI requires a number; operator confirmation is required before issue
+- Omits optional `memberAvailMaxCount`, device, purchase amount, purchase quantity, and member-rank restrictions
+- Customer-facing shop name: `ホムブリス`
 
 ### B. Spend-tier bundle
 
