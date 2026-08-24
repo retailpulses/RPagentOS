@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { PlatformAccountMonthlyMetric } from '@lib/account-metrics-types'
+import type { ManualAccountMetricInput, PlatformAccountMetricAccount, PlatformAccountMonthlyMetric } from '@lib/account-metrics-types'
 import { useAccountMetrics } from '../hooks/useAccountMetrics'
 import {
   aggregateCompleteAccountMetrics,
@@ -21,6 +21,122 @@ const METRIC_OPTIONS: Array<{ key: MetricKey; label: string }> = [
   { key: 'average_purchase_value', label: 'Purchase value' },
   { key: 'new_follower_count', label: 'New followers' },
 ]
+
+function ManualMetricForm({
+  accounts,
+  saving,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  accounts: PlatformAccountMetricAccount[]
+  saving: boolean
+  error: string | null
+  onCancel: () => void
+  onSubmit: (input: ManualAccountMetricInput) => Promise<void>
+}) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
+  const [periodMonth, setPeriodMonth] = useState('')
+  const [sourceAsOfDate, setSourceAsOfDate] = useState('')
+  const [coverageStatus, setCoverageStatus] = useState<'complete' | 'partial'>('complete')
+  const [salesAmount, setSalesAmount] = useState('')
+  const [visitorCount, setVisitorCount] = useState('')
+  const [averagePurchaseValue, setAveragePurchaseValue] = useState('')
+  const [newFollowerCount, setNewFollowerCount] = useState('')
+  const [reportedConversionPercent, setReportedConversionPercent] = useState('')
+  const [reportedConversionReliable, setReportedConversionReliable] = useState(false)
+  const [note, setNote] = useState('')
+
+  useEffect(() => {
+    if (!accounts.some((account) => account.id === accountId)) setAccountId(accounts[0]?.id ?? '')
+  }, [accountId, accounts])
+
+  return (
+    <section className="card metrics-entry-card">
+      <div className="metrics-section-heading">
+        <div>
+          <p className="metrics-eyebrow">MANUAL INPUT</p>
+          <h3>Add monthly metrics</h3>
+          <p className="text-muted text-sm">Insert only. If this account and month already exist, nothing will be overwritten.</p>
+        </div>
+      </div>
+      <form
+        className="metrics-entry-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void onSubmit({
+            platform_account_id: accountId,
+            period_month: periodMonth,
+            source_as_of_date: sourceAsOfDate || null,
+            coverage_status: coverageStatus,
+            sales_amount: Number(salesAmount),
+            visitor_count: Number(visitorCount),
+            reported_conversion_rate: reportedConversionPercent === '' ? null : Number(reportedConversionPercent) / 100,
+            reported_conversion_rate_reliable: reportedConversionReliable,
+            average_purchase_value: Number(averagePurchaseValue),
+            new_follower_count: Number(newFollowerCount),
+            note: note.trim() || null,
+          })
+        }}
+      >
+        <div className="form-group">
+          <label>Marketplace account *</label>
+          <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.display_name || account.shop_code} · {account.platform}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Month *</label>
+          <input required type="month" value={periodMonth} onChange={(event) => setPeriodMonth(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Coverage *</label>
+          <select value={coverageStatus} onChange={(event) => setCoverageStatus(event.target.value as 'complete' | 'partial')}>
+            <option value="complete">Complete month</option>
+            <option value="partial">Partial month</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Source as-of date</label>
+          <input type="date" value={sourceAsOfDate} onChange={(event) => setSourceAsOfDate(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Sales amount (JPY) *</label>
+          <input required type="number" min="0" step="0.01" value={salesAmount} onChange={(event) => setSalesAmount(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Visitors *</label>
+          <input required type="number" min="0" step="1" value={visitorCount} onChange={(event) => setVisitorCount(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Average purchase value *</label>
+          <input required type="number" min="0" step="0.01" value={averagePurchaseValue} onChange={(event) => setAveragePurchaseValue(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>New followers *</label>
+          <input required type="number" min="0" step="1" value={newFollowerCount} onChange={(event) => setNewFollowerCount(event.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Reported CVR (%)</label>
+          <input type="number" min="0" max="100" step="0.0001" value={reportedConversionPercent} onChange={(event) => setReportedConversionPercent(event.target.value)} placeholder="e.g. 0.25" />
+        </div>
+        <label className="metrics-entry-checkbox">
+          <input type="checkbox" checked={reportedConversionReliable} onChange={(event) => setReportedConversionReliable(event.target.checked)} />
+          Reported CVR is reliable
+        </label>
+        <div className="form-group metrics-entry-note">
+          <label>Manager note</label>
+          <textarea maxLength={500} rows={2} value={note} onChange={(event) => setNote(event.target.value)} />
+        </div>
+        {error && <p className="metrics-error metrics-entry-error">{error}</p>}
+        <div className="flex gap-2 metrics-entry-actions">
+          <button className="btn btn-primary" type="submit" disabled={saving || !accountId}>{saving ? 'Saving...' : 'Save monthly metrics'}</button>
+          <button className="btn" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
+        </div>
+      </form>
+    </section>
+  )
+}
 
 function currency(value: number, code = 'JPY'): string {
   return new Intl.NumberFormat('ja-JP', {
@@ -133,7 +249,9 @@ function planningParams(
 export default function AccountMetrics() {
   const [selectedAccountId, setSelectedAccountId] = useState(COMBINED_MERCARI_ACCOUNT_ID)
   const [chartMetric, setChartMetric] = useState<MetricKey>('sales_amount')
-  const { data, loading, error, refetch } = useAccountMetrics()
+  const [showEntry, setShowEntry] = useState(false)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const { data, loading, error, saving, mutationError, refetch, createManualMetric } = useAccountMetrics()
 
   useEffect(() => {
     if (data.accounts.length === 0) return
@@ -176,11 +294,32 @@ export default function AccountMetrics() {
           <h2>Account Metrics</h2>
           <p className="text-muted">Review trends, decide what matters, then plan work manually.</p>
         </div>
-        <button className="btn" type="button" onClick={() => void refetch()} disabled={loading}>Refresh</button>
+        <div className="flex gap-2">
+          <button className="btn btn-primary" type="button" onClick={() => { setSaveMessage(null); setShowEntry((visible) => !visible) }}>Add monthly metrics</button>
+          <button className="btn" type="button" onClick={() => void refetch()} disabled={loading}>Refresh</button>
+        </div>
       </div>
 
       {error && <p className="metrics-error">{error}</p>}
+      {saveMessage && <p className="metrics-success">{saveMessage}</p>}
       {loading && <p className="text-muted">Loading account metrics...</p>}
+
+      {showEntry && data.accounts.length > 0 && (
+        <ManualMetricForm
+          accounts={data.accounts}
+          saving={saving}
+          error={mutationError}
+          onCancel={() => setShowEntry(false)}
+          onSubmit={async (input) => {
+            const inserted = await createManualMetric(input)
+            if (!inserted) return
+            const account = data.accounts.find((candidate) => candidate.id === input.platform_account_id)
+            setSelectedAccountId(input.platform_account_id)
+            setSaveMessage(`${account?.display_name || account?.shop_code || 'Account'} ${input.period_month} metrics were added.`)
+            setShowEntry(false)
+          }}
+        />
+      )}
 
       {!loading && data.accounts.length > 0 && (
         <>

@@ -217,6 +217,23 @@ before running `--apply`.
 - **Rollback:** delete only rows matching the four exact source filenames and `mercari_seller_dashboard_monthly_csv`
 - **Approval and evidence:** [RPagentOS issue #70](https://github.com/retailpulses/RPagentOS/issues/70)
 
+## Manual Account Metrics Portal Entry Workload
+
+- **Workload ID:** `account_metrics_manual_portal_entry`
+- **Category:** agent_operations
+- **Risk level:** medium while the temporary unauthenticated portal endpoint remains enabled
+- **Trigger:** manual, user-triggered submission from `agent.homesbliss.net/metrics`
+- **Affected tables:** `platform_accounts` (bounded active-account read) and `platform_account_monthly_metrics` (bounded conflict read plus insert)
+- **Access path:** `internal_api` Cloudflare Pages Function using server-side PostgREST; the browser never receives a Supabase credential
+- **Bounds:** at most 3 PostgREST requests and 1 inserted row per submission; no loop, pagination, retry, update, delete, or overwrite path
+- **Concurrency:** one request-local execution; database uniqueness handles concurrent duplicate submissions
+- **Idempotency:** reject any existing account/month before insert; the `platform_account_id, period_start, source_system` unique key rejects concurrent duplicate manual inserts
+- **Kill switch:** remove or disable `onRequestPost` in `functions/api/account-metrics.ts` and redeploy the Pages application
+- **Rollback:** disable POST; preserve submitted rows for audit. Any later correction/removal requires a separately reviewed owner operation targeting explicit row IDs.
+- **Authentication exception:** temporary unauthenticated POST explicitly requested by the owner; retirement and portal-wide authorization are tracked in [RPagentOS issue #85](https://github.com/retailpulses/RPagentOS/issues/85)
+- **Approval and implementation:** [RPagentOS issue #86](https://github.com/retailpulses/RPagentOS/issues/86)
+- **Canonical registration:** [rp-governance-kit issue #51](https://github.com/retailpulses/rp-governance-kit/issues/51)
+
 ## Deployment Authority
 
 Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp-governance-kit §6.
