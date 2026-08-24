@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { PlatformAccountMonthlyMetric } from '@lib/account-metrics-types'
 import { useAccountMetrics } from '../hooks/useAccountMetrics'
 import {
+  aggregateCompleteAccountMetrics,
   buildManagementSignals,
   completePeriods,
   latestCompleteComparison,
@@ -10,6 +11,8 @@ import {
   type ManagementSignal,
   type MetricKey,
 } from '../lib/accountMetrics'
+
+const COMBINED_MERCARI_ACCOUNT_ID = 'mercari-combined'
 
 const METRIC_OPTIONS: Array<{ key: MetricKey; label: string }> = [
   { key: 'sales_amount', label: 'Sales' },
@@ -128,25 +131,42 @@ function planningParams(
 }
 
 export default function AccountMetrics() {
-  const [selectedAccountId, setSelectedAccountId] = useState('')
+  const [selectedAccountId, setSelectedAccountId] = useState(COMBINED_MERCARI_ACCOUNT_ID)
   const [chartMetric, setChartMetric] = useState<MetricKey>('sales_amount')
   const { data, loading, error, refetch } = useAccountMetrics()
 
   useEffect(() => {
     if (data.accounts.length === 0) return
+    if (selectedAccountId === COMBINED_MERCARI_ACCOUNT_ID) return
     if (data.accounts.some((account) => account.id === selectedAccountId)) return
-    const defaultAccount = data.accounts.find((account) => account.shop_code === 'shop4') ?? data.accounts[0]
-    setSelectedAccountId(defaultAccount.id)
+    setSelectedAccountId(COMBINED_MERCARI_ACCOUNT_ID)
   }, [data.accounts, selectedAccountId])
 
-  const selectedAccount = data.accounts.find((account) => account.id === selectedAccountId) ?? null
+  const mercariAccounts = useMemo(
+    () => data.accounts.filter((account) => account.platform === 'mercari'),
+    [data.accounts],
+  )
+  const combinedRows = useMemo(
+    () => aggregateCompleteAccountMetrics(
+      data.metrics,
+      mercariAccounts.map((account) => account.id),
+      COMBINED_MERCARI_ACCOUNT_ID,
+    ),
+    [data.metrics, mercariAccounts],
+  )
+  const combinedSelected = selectedAccountId === COMBINED_MERCARI_ACCOUNT_ID
+  const selectedAccount = combinedSelected
+    ? { id: COMBINED_MERCARI_ACCOUNT_ID, platform: 'mercari', shop_code: 'all-mercari-shops' }
+    : data.accounts.find((account) => account.id === selectedAccountId) ?? null
   const rows = useMemo(
-    () => data.metrics.filter((row) => row.platform_account_id === selectedAccountId),
-    [data.metrics, selectedAccountId],
+    () => combinedSelected
+      ? combinedRows
+      : data.metrics.filter((row) => row.platform_account_id === selectedAccountId),
+    [combinedRows, combinedSelected, data.metrics, selectedAccountId],
   )
   const { latest, previous } = latestCompleteComparison(rows)
   const signals = buildManagementSignals(rows)
-  const partial = [...rows].reverse().find((row) => row.coverage_status === 'partial') ?? null
+  const partial = combinedSelected ? null : [...rows].reverse().find((row) => row.coverage_status === 'partial') ?? null
 
   return (
     <div className="metrics-page">
@@ -168,6 +188,7 @@ export default function AccountMetrics() {
             <div className="form-group">
               <label>Marketplace account</label>
               <select value={selectedAccountId} onChange={(event) => setSelectedAccountId(event.target.value)}>
+                <option value={COMBINED_MERCARI_ACCOUNT_ID}>All Mercari Shops · combined</option>
                 {data.accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.display_name || account.shop_code} · {account.platform}
@@ -179,6 +200,12 @@ export default function AccountMetrics() {
               <span>Latest complete period</span>
               <strong>{latest ? monthLabel(latest.period_start) : '—'}</strong>
             </div>
+            {combinedSelected && (
+              <div className="metrics-period-note">
+                <span>Combined coverage</span>
+                <strong>{mercariAccounts.length} shops · strict complete-month overlap</strong>
+              </div>
+            )}
             {partial && (
               <div className="metrics-period-note partial">
                 <span>Partial period available</span>
@@ -205,7 +232,7 @@ export default function AccountMetrics() {
             <div className="flex justify-between items-center gap-3">
               <div>
                 <h3>{METRIC_OPTIONS.find((option) => option.key === chartMetric)?.label} trend</h3>
-                <p className="text-muted text-sm">Complete months only. Click a KPI card to change the chart.</p>
+                <p className="text-muted text-sm">{combinedSelected ? 'Months with valid complete data for every Mercari shop only.' : 'Complete months only.'} Click a KPI card to change the chart.</p>
               </div>
             </div>
             <TrendChart rows={rows} metric={chartMetric} />
@@ -241,7 +268,7 @@ export default function AccountMetrics() {
           )}
 
           <section className="card metrics-table-card">
-            <h3>Monthly history</h3>
+            <h3>{combinedSelected ? 'Combined monthly history' : 'Monthly history'}</h3>
             <div className="metrics-table-wrap">
               <table className="metrics-table">
                 <thead>
