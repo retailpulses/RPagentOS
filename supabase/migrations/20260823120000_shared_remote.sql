@@ -4,6 +4,7 @@
 -- Change class: additive
 -- Hosted write required: no
 -- Consumers: retailpulses/ticket-handling
+-- Cross-domain exception: retailpulses/ticket-handling#193
 --
 -- Shared hosted-history alignment artifact only. The executable migration is
 -- owned by retailpulses/ticket-handling and was reviewed in PR #193:
@@ -12,4 +13,3 @@
 --
 -- This file intentionally contains no executable SQL and conveys no ownership
 -- claim for the ticketing domain.
-
