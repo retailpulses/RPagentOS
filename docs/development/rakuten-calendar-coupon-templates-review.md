@@ -1,6 +1,7 @@
 # Rakuten Calendar-driven Coupon Templates — Feature Review
 
 Status: Proposed for review  
+Related issue: #82  
 Scope: Rakuten Coupon only  
 Initial campaign: `5と0のつく日`  
 Out of scope: Amazon Coupon, Time Sale, Ads/Campaign execution, automatic publishing
