@@ -11,6 +11,7 @@ const ProjectList = lazy(() => import('./pages/ProjectList'))
 const CreateProject = lazy(() => import('./pages/CreateProject'))
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
 const AccountMetrics = lazy(() => import('./pages/AccountMetrics'))
+const PromotionPlanner = lazy(() => import('./pages/PromotionPlanner'))
 
 export default function App() {
   return (
@@ -23,6 +24,8 @@ export default function App() {
           <Route path="/board" element={<Board />} />
           <Route path="/task/board" element={<Board />} />
           <Route path="/listing" element={<ListingAudit />} />
+          <Route path="/promotions" element={<PromotionPlanner />} />
+          <Route path="/promotion" element={<Navigate to="/promotions" replace />} />
           <Route path="/listing-audit" element={<Navigate to="/listing" replace />} />
           <Route path="/task/new" element={<CreateTask />} />
           <Route path="/tasks/new" element={<CreateTask />} />
