@@ -5,7 +5,6 @@ import type {
 } from '../lib/account-metrics-types.js';
 
 export interface AccountMetricsEnv {
-  ACCOUNT_METRICS_API_TOKEN?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
 }
@@ -20,21 +19,6 @@ const JSON_HEADERS = {
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
-}
-
-function bearerToken(request: Request): string | null {
-  const authorization = request.headers.get('authorization');
-  if (!authorization?.startsWith('Bearer ')) return null;
-  return authorization.slice('Bearer '.length).trim() || null;
-}
-
-function tokensEqual(actual: string, expected: string): boolean {
-  const length = Math.max(actual.length, expected.length);
-  let mismatch = actual.length ^ expected.length;
-  for (let index = 0; index < length; index += 1) {
-    mismatch |= (actual.charCodeAt(index) || 0) ^ (expected.charCodeAt(index) || 0);
-  }
-  return mismatch === 0;
 }
 
 function validFilter(value: string | null): value is string {
@@ -60,13 +44,8 @@ export async function handleAccountMetricsRequest(
     return response;
   }
 
-  if (!env.ACCOUNT_METRICS_API_TOKEN || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return json({ error: 'account_metrics_not_configured' }, 503);
-  }
-
-  const token = bearerToken(request);
-  if (!token || !tokensEqual(token, env.ACCOUNT_METRICS_API_TOKEN)) {
-    return json({ error: 'unauthorized' }, 401);
   }
 
   const url = new URL(request.url);

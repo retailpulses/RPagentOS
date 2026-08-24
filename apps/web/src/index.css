@@ -381,16 +381,6 @@ input, textarea, select {
   margin: 0 auto;
 }
 
-.metrics-access {
-  width: min(440px, 100%);
-  margin: 12vh auto 0;
-  padding: 1.5rem;
-}
-
-.metrics-access h2 {
-  margin: 0.2rem 0 0.5rem;
-}
-
 .metrics-eyebrow {
   color: var(--color-primary);
   font-size: 0.68rem;

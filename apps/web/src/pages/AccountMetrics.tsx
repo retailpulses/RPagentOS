@@ -11,8 +11,6 @@ import {
   type MetricKey,
 } from '../lib/accountMetrics'
 
-const TOKEN_STORAGE_KEY = 'rpagentos.accountMetricsToken'
-
 const METRIC_OPTIONS: Array<{ key: MetricKey; label: string }> = [
   { key: 'sales_amount', label: 'Sales' },
   { key: 'visitor_count', label: 'Visitors' },
@@ -130,11 +128,9 @@ function planningParams(
 }
 
 export default function AccountMetrics() {
-  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? '')
-  const [tokenDraft, setTokenDraft] = useState('')
   const [selectedAccountId, setSelectedAccountId] = useState('')
   const [chartMetric, setChartMetric] = useState<MetricKey>('sales_amount')
-  const { data, loading, error, unauthorized, refetch } = useAccountMetrics(token)
+  const { data, loading, error, refetch } = useAccountMetrics()
 
   useEffect(() => {
     if (data.accounts.length === 0) return
@@ -142,11 +138,6 @@ export default function AccountMetrics() {
     const defaultAccount = data.accounts.find((account) => account.shop_code === 'shop4') ?? data.accounts[0]
     setSelectedAccountId(defaultAccount.id)
   }, [data.accounts, selectedAccountId])
-
-  useEffect(() => {
-    if (!unauthorized) return
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-  }, [unauthorized])
 
   const selectedAccount = data.accounts.find((account) => account.id === selectedAccountId) ?? null
   const rows = useMemo(
@@ -157,33 +148,6 @@ export default function AccountMetrics() {
   const signals = buildManagementSignals(rows)
   const partial = [...rows].reverse().find((row) => row.coverage_status === 'partial') ?? null
 
-  if (!token || unauthorized) {
-    return (
-      <div className="metrics-access card">
-        <p className="metrics-eyebrow">BUSINESS PERFORMANCE</p>
-        <h2>Account Metrics</h2>
-        <p className="text-muted">Enter the shop-manager access token. It is kept only for this browser tab.</p>
-        <form
-          className="flex flex-col gap-3 mt-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const nextToken = tokenDraft.trim()
-            if (!nextToken) return
-            sessionStorage.setItem(TOKEN_STORAGE_KEY, nextToken)
-            setToken(nextToken)
-          }}
-        >
-          <div className="form-group">
-            <label>Manager access token</label>
-            <input type="password" autoComplete="current-password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} />
-          </div>
-          {error && <p className="metrics-error">{error}</p>}
-          <button className="btn btn-primary" type="submit" disabled={!tokenDraft.trim()}>Open dashboard</button>
-        </form>
-      </div>
-    )
-  }
-
   return (
     <div className="metrics-page">
       <div className="page-header metrics-page-header">
@@ -192,13 +156,7 @@ export default function AccountMetrics() {
           <h2>Account Metrics</h2>
           <p className="text-muted">Review trends, decide what matters, then plan work manually.</p>
         </div>
-        <div className="flex gap-2">
-          <button className="btn" type="button" onClick={() => void refetch()} disabled={loading}>Refresh</button>
-          <button className="btn" type="button" onClick={() => {
-            sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-            setToken('')
-          }}>Lock</button>
-        </div>
+        <button className="btn" type="button" onClick={() => void refetch()} disabled={loading}>Refresh</button>
       </div>
 
       {error && <p className="metrics-error">{error}</p>}
@@ -313,4 +271,3 @@ export default function AccountMetrics() {
     </div>
   )
 }
-

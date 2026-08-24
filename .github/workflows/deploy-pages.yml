@@ -58,15 +58,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
           LISTING_COPY_INTERNAL_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
-          ACCOUNT_METRICS_API_TOKEN: ${{ secrets.ACCOUNT_METRICS_API_TOKEN }}
         run: |
-          for SECRET_NAME in ORDERMGMT_CATALOG_API_TOKEN LISTING_COPY_INTERNAL_API_TOKEN ACCOUNT_METRICS_API_TOKEN; do
+          for SECRET_NAME in ORDERMGMT_CATALOG_API_TOKEN LISTING_COPY_INTERNAL_API_TOKEN; do
             if [ -z "${!SECRET_NAME}" ]; then
               echo "::error::$SECRET_NAME is not configured"
               exit 1
             fi
           done
-          node -e "process.stdout.write(JSON.stringify({ ORDERMGMT_CATALOG_API_TOKEN: process.env.ORDERMGMT_CATALOG_API_TOKEN, INTERNAL_CATALOG_API_TOKEN: process.env.LISTING_COPY_INTERNAL_API_TOKEN, ACCOUNT_METRICS_API_TOKEN: process.env.ACCOUNT_METRICS_API_TOKEN }))" \
+          node -e "process.stdout.write(JSON.stringify({ ORDERMGMT_CATALOG_API_TOKEN: process.env.ORDERMGMT_CATALOG_API_TOKEN, INTERNAL_CATALOG_API_TOKEN: process.env.LISTING_COPY_INTERNAL_API_TOKEN }))" \
             | npx --yes wrangler@4.80.0 pages secret bulk \
                 --project-name rpagentos
 
@@ -111,21 +110,18 @@ jobs:
           echo "::error::Listing copy credential smoke failed (expected authenticated 400, got $STATUS)"
           exit 1
 
-      - name: Verify account metrics manager credential
-        env:
-          ACCOUNT_METRICS_API_TOKEN: ${{ secrets.ACCOUNT_METRICS_API_TOKEN }}
+      - name: Verify public account metrics endpoint
         run: |
           STATUS=""
           for ATTEMPT in 1 2 3 4 5; do
             STATUS=$(curl -sS -o /tmp/account-metrics-smoke.json -w '%{http_code}' \
-              -H "Authorization: Bearer $ACCOUNT_METRICS_API_TOKEN" \
               'https://rpagentos.pages.dev/api/account-metrics?platform=mercari&shop_code=shop4')
             if [ "$STATUS" = "200" ]; then
-              echo "Account metrics credential accepted by production"
+              echo "Account metrics endpoint available in production"
               exit 0
             fi
             echo "Attempt $ATTEMPT/5 returned HTTP $STATUS; retrying"
             sleep 3
           done
-          echo "::error::Account metrics credential smoke failed (expected 200, got $STATUS)"
+          echo "::error::Account metrics smoke failed (expected 200, got $STATUS)"
           exit 1
