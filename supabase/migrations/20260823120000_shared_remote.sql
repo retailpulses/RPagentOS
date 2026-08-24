@@ -1,0 +1,15 @@
+-- Domain: ticketing
+-- Owner: retailpulses/ticket-handling
+-- Affected: rakuten_rmesse_inquiries, rakuten_rmesse_sync_state, ingest_rakuten_rmesse_inquiry
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/ticket-handling
+--
+-- Shared hosted-history alignment artifact only. The executable migration is
+-- owned by retailpulses/ticket-handling and was reviewed in PR #193:
+-- https://github.com/retailpulses/ticket-handling/pull/193
+-- Authoritative commit: 1c8519e
+--
+-- This file intentionally contains no executable SQL and conveys no ownership
+-- claim for the ticketing domain.
+

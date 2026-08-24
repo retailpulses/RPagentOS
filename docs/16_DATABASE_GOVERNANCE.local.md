@@ -11,7 +11,7 @@ Last updated: 2026-07-17
 
 ## Owned Domains
 
-- `product_catalog` — products, product_variants, platform_listings, product_families, product_spus, product_assets, product_commercials, bundle_products, bundle_components, platform_listing_skus, platform_listing_images, platform_listing_attributes, platform_listing_price_tiers, product_platform_links, promotion_candidates, merchandising_focus_items, source_import_runs, source_import_rows, platform_accounts, import_errors, listing_target_classification_v1 view
+- `product_catalog` — products, product_variants, platform_listings, product_families, product_spus, product_assets, product_commercials, bundle_products, bundle_components, platform_listing_skus, platform_listing_images, platform_listing_attributes, platform_listing_price_tiers, product_platform_links, promotion_candidates, merchandising_focus_items, source_import_runs, source_import_rows, platform_accounts, platform_account_monthly_metrics, import_errors, listing_target_classification_v1 view
 - `agent_os` — agent_runs, agent_decisions, human_approvals, agent_execution_logs
 - `task_management` — tasks, task_targets, task_steps, task_comments, task_logs, task_select_options, task_attachments
 - `project_management` — projects, project_attachments (shared with ticket-handling)
@@ -200,6 +200,22 @@ before running `--apply`.
 ## Generated Types
 
 **Exempt.** The Worker is the sole Supabase client. Types are generated from API route signatures.
+
+## One-Off Workload: Mercari Monthly Account Metrics Seed
+
+- **Workload ID:** `mercari_monthly_account_metrics_seed_20260824`
+- **Category:** imports
+- **Risk level:** medium
+- **Trigger:** manual migration, one time
+- **Affected table:** `platform_account_monthly_metrics`
+- **Access path:** `direct_postgres` through the pinned Supabase CLI migration path
+- **Expected volume:** 46 rows across Mercari shop1 through shop4
+- **Concurrency:** 1
+- **Retries:** 0
+- **Kill switch:** cancel before migration transaction commit; SQL errors abort the transaction
+- **Idempotency:** account/month/source unique key plus `ON CONFLICT DO NOTHING`
+- **Rollback:** delete only rows matching the four exact source filenames and `mercari_seller_dashboard_monthly_csv`
+- **Approval and evidence:** [RPagentOS issue #70](https://github.com/retailpulses/RPagentOS/issues/70)
 
 ## Deployment Authority
 
