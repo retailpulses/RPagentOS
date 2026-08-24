@@ -79,6 +79,20 @@ jobs:
             | npx --yes wrangler@4.80.0 pages secret put INTERNAL_CATALOG_API_TOKEN \
                 --project-name rpagentos
 
+      - name: Synchronize account metrics manager token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_METRICS_API_TOKEN: ${{ secrets.ACCOUNT_METRICS_API_TOKEN }}
+        run: |
+          if [ -z "$ACCOUNT_METRICS_API_TOKEN" ]; then
+            echo "::error::ACCOUNT_METRICS_API_TOKEN is not configured"
+            exit 1
+          fi
+          printf '%s\n' "$ACCOUNT_METRICS_API_TOKEN" \
+            | npx --yes wrangler@4.80.0 pages secret put ACCOUNT_METRICS_API_TOKEN \
+                --project-name rpagentos
+
       - name: Verify OrderMgmt catalog credential
         env:
           ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
@@ -118,4 +132,23 @@ jobs:
             sleep 3
           done
           echo "::error::Listing copy credential smoke failed (expected authenticated 400, got $STATUS)"
+          exit 1
+
+      - name: Verify account metrics manager credential
+        env:
+          ACCOUNT_METRICS_API_TOKEN: ${{ secrets.ACCOUNT_METRICS_API_TOKEN }}
+        run: |
+          STATUS=""
+          for ATTEMPT in 1 2 3 4 5; do
+            STATUS=$(curl -sS -o /tmp/account-metrics-smoke.json -w '%{http_code}' \
+              -H "Authorization: Bearer $ACCOUNT_METRICS_API_TOKEN" \
+              'https://rpagentos.pages.dev/api/account-metrics?platform=mercari&shop_code=shop4')
+            if [ "$STATUS" = "200" ]; then
+              echo "Account metrics credential accepted by production"
+              exit 0
+            fi
+            echo "Attempt $ATTEMPT/5 returned HTTP $STATUS; retrying"
+            sleep 3
+          done
+          echo "::error::Account metrics credential smoke failed (expected 200, got $STATUS)"
           exit 1

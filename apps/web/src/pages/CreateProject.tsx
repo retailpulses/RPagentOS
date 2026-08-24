@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCreateProject } from '../hooks/useProjects';
 
 export default function CreateProject() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { create, loading, error } = useCreateProject();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState(searchParams.get('name') ?? '');
+  const [description, setDescription] = useState(searchParams.get('description') ?? '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,6 +16,13 @@ export default function CreateProject() {
     const result = await create({
       name: name.trim(),
       description: description.trim() || undefined,
+      metadata: searchParams.get('source') ? {
+        source: searchParams.get('source'),
+        platform: searchParams.get('platform'),
+        shop_code: searchParams.get('shop_code'),
+        metric_period: searchParams.get('period'),
+        metric_signal: searchParams.get('signal'),
+      } : undefined,
     });
 
     if (result) {

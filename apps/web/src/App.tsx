@@ -10,6 +10,7 @@ const TaskDetail = lazy(() => import('./pages/TaskDetail'))
 const ProjectList = lazy(() => import('./pages/ProjectList'))
 const CreateProject = lazy(() => import('./pages/CreateProject'))
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
+const AccountMetrics = lazy(() => import('./pages/AccountMetrics'))
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/projects" element={<ProjectList />} />
           <Route path="/projects/new" element={<CreateProject />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/metrics" element={<AccountMetrics />} />
         </Routes>
       </Suspense>
     </Layout>
