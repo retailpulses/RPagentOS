@@ -19,6 +19,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/projects" className={({ isActive }) => isActive ? 'active' : ''}>
             Projects
           </NavLink>
+          <NavLink to="/metrics" className={({ isActive }) => isActive ? 'active' : ''}>
+            Account Metrics
+          </NavLink>
           <NavLink to="/task/new" className={({ isActive }) => isActive ? 'active' : ''}>
             + New Task
           </NavLink>

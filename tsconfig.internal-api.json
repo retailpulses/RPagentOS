@@ -12,6 +12,12 @@
     "src/api/internal-catalog-source-imports.test.ts",
     "src/api/internal-catalog-listing-candidates.test.ts",
     "src/api/internal-catalog-manual-fields.test.ts",
+    "src/api/account-metrics.ts",
+    "src/api/account-metrics.test.ts",
+    "src/lib/account-metrics-types.ts",
+    "apps/web/src/lib/accountMetrics.ts",
+    "apps/web/src/lib/accountMetrics.test.ts",
+    "functions/api/account-metrics.ts",
     "functions/api/internal/catalog/**/*.ts"
   ]
 }
