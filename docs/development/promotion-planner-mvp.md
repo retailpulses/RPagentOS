@@ -22,6 +22,9 @@ Time sale, Ads, and Campaign remain future promotion types.
 - No Supabase writes and no marketplace API calls.
 - “Submit for publish review” changes only the local plan status.
 - JSON export is available for review and downstream API-contract work.
+- Form field names and enum choices are Japanese-first to match RMS operator
+  terminology. CouponAPI identifiers remain visible as secondary labels and
+  remain unchanged in exported payloads.
 - The exported DTO uses the verified Rakuten names `couponName`,
   `couponCaption`, `couponStartDate`, `couponEndDate`, `couponImage`,
   `issueCount`, `itemType`, `discountType`, `discountFactor`,

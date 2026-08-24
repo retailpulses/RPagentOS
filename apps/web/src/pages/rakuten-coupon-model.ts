@@ -9,6 +9,30 @@ export type RakutenItemType = 1 | 3 | 4 | 5
 export type RakutenDiscountType = 1 | 2 | 4
 export type RakutenRankCode = 0 | 1 | 2 | 3 | 4 | 5
 
+export const RAKUTEN_RMS_FIELD_LABELS = {
+  internalName: '社内管理名',
+  shopCode: 'ショップコード',
+  couponName: 'クーポン名',
+  couponCaption: 'クーポン説明文',
+  couponStartDate: 'クーポン有効期間（開始日時）',
+  couponEndDate: 'クーポン有効期間（終了日時）',
+  couponImage: 'クーポン画像',
+  issueCount: 'クーポン発行枚数',
+  memberAvailMaxCount: '1会員あたりの利用上限回数',
+  itemType: 'クーポン対象',
+  discountType: '値引きタイプ',
+  discountFactor: '値引き額・割引率',
+  itemUrls: '対象商品URL',
+  combineFlag: '他クーポンとの併用',
+  displayFlag: 'クーポンの表示',
+  deviceCondition: '利用端末条件',
+  minimumSpend: '利用金額条件',
+  minimumQuantity: '利用個数条件',
+  multiRankCond: '会員ランク条件',
+  notes: '社内メモ',
+  couponCode: 'クーポンコード',
+} as const
+
 export const FIVE_ZERO_EVENT_KEY = 'rakuten_5_and_0_day' as const
 export const FIVE_ZERO_TEMPLATE_ID = 'five_zero_storewide_percent' as const
 export const FIVE_ZERO_TEMPLATE_VERSION = 1

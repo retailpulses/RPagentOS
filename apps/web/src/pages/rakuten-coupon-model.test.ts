@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildFiveZeroCouponPlan, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM, fiveZeroOccurrences, updateModeForCoupon, validateRakutenCouponForm, type RakutenCouponPlan } from './rakuten-coupon-model.js'
+import { buildFiveZeroCouponPlan, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM, fiveZeroOccurrences, RAKUTEN_RMS_FIELD_LABELS, updateModeForCoupon, validateRakutenCouponForm, type RakutenCouponPlan } from './rakuten-coupon-model.js'
 
 const validForm = { ...EMPTY_RAKUTEN_COUPON_FORM, internalName: 'September coupon', couponName: '秋のお買い物10%OFF', couponCaption: '全品10%割引', couponStartDate: '2026-09-01T00:00', couponEndDate: '2026-09-30T23:59' }
 
@@ -68,4 +68,11 @@ test('builds an idempotent hidden review payload for the August 25 occurrence', 
 
 test('rejects a non-5と0 date', () => {
   assert.throws(() => buildFiveZeroCouponPlan('2026-08-24'), /valid 5と0/)
+})
+
+test('provides Japanese RMS labels without renaming CouponAPI fields', () => {
+  assert.equal(RAKUTEN_RMS_FIELD_LABELS.couponName, 'クーポン名')
+  assert.equal(RAKUTEN_RMS_FIELD_LABELS.displayFlag, 'クーポンの表示')
+  assert.equal(RAKUTEN_RMS_FIELD_LABELS.memberAvailMaxCount, '1会員あたりの利用上限回数')
+  assert.equal('couponName' in buildRakutenCouponPayload(validForm), true)
 })
