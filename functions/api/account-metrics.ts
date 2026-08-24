@@ -12,3 +12,6 @@ export async function onRequestGet(context: PagesFunctionContext): Promise<Respo
   return handleAccountMetricsRequest(context.request, context.env);
 }
 
+export async function onRequestPost(context: PagesFunctionContext): Promise<Response> {
+  return handleAccountMetricsRequest(context.request, context.env);
+}

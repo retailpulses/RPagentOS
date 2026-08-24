@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AccountMetricsResponse } from '@lib/account-metrics-types'
+import type { AccountMetricsResponse, ManualAccountMetricInput, PlatformAccountMonthlyMetric } from '@lib/account-metrics-types'
 
 export function useAccountMetrics() {
   const [data, setData] = useState<AccountMetricsResponse>({ accounts: [], metrics: [] })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true)
@@ -29,5 +31,28 @@ export function useAccountMetrics() {
 
   useEffect(() => { void fetchMetrics() }, [fetchMetrics])
 
-  return { data, loading, error, refetch: fetchMetrics }
+  const createManualMetric = useCallback(async (input: ManualAccountMetricInput): Promise<PlatformAccountMonthlyMetric | null> => {
+    setSaving(true)
+    setMutationError(null)
+    try {
+      const response = await fetch('/api/account-metrics', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      const payload = await response.json() as { metric?: PlatformAccountMonthlyMetric; error?: string }
+      if (response.status === 409) throw new Error('This account already has metrics for the selected month. Existing data was not changed.')
+      if (response.status === 404) throw new Error('The selected account is no longer active.')
+      if (!response.ok || !payload.metric) throw new Error('The monthly metric could not be saved. Check every field and try again.')
+      await fetchMetrics()
+      return payload.metric
+    } catch (caught) {
+      setMutationError(caught instanceof Error ? caught.message : 'The monthly metric could not be saved.')
+      return null
+    } finally {
+      setSaving(false)
+    }
+  }, [fetchMetrics])
+
+  return { data, loading, error, saving, mutationError, refetch: fetchMetrics, createManualMetric }
 }

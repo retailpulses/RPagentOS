@@ -30,3 +30,16 @@ export interface AccountMetricsResponse {
   metrics: PlatformAccountMonthlyMetric[];
 }
 
+export interface ManualAccountMetricInput {
+  platform_account_id: string;
+  period_month: string;
+  source_as_of_date?: string | null;
+  coverage_status: 'complete' | 'partial';
+  sales_amount: number;
+  visitor_count: number;
+  reported_conversion_rate?: number | null;
+  reported_conversion_rate_reliable: boolean;
+  average_purchase_value: number;
+  new_follower_count: number;
+  note?: string | null;
+}
