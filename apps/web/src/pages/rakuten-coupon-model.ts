@@ -35,7 +35,7 @@ export const RAKUTEN_RMS_FIELD_LABELS = {
 
 export const FIVE_ZERO_EVENT_KEY = 'rakuten_5_and_0_day' as const
 export const FIVE_ZERO_TEMPLATE_ID = 'five_zero_storewide_percent' as const
-export const FIVE_ZERO_TEMPLATE_VERSION = 1
+export const FIVE_ZERO_TEMPLATE_VERSION = 2
 
 export interface RakutenCalendarGeneration {
   eventKey: typeof FIVE_ZERO_EVENT_KEY
@@ -65,7 +65,7 @@ export interface RakutenCouponToIssue {
   itemType: RakutenItemType
   discountType: RakutenDiscountType
   discountFactor: number
-  memberAvailMaxCount: number
+  memberAvailMaxCount?: number
   multiRankCond?: RakutenRankCode[]
   combineFlag: 0 | 1
   displayFlag: 0 | 1
@@ -108,8 +108,8 @@ export const FIVE_ZERO_TEMPLATE: RakutenCouponTemplateDefinition = {
   name: '5と0の日 · 店舗限定5%OFF',
   eventKey: FIVE_ZERO_EVENT_KEY,
   shopCode: 'homebliss',
-  discountLabel: 'Entire order · 5% off',
-  guardrails: ['Operator approval required', 'Margin confirmation required', 'No coupon combination', 'Hidden until RMS review'],
+  discountLabel: '店内全商品 · 5%OFF',
+  guardrails: ['店内全商品が対象', '最低利用金額なし', '1会員あたりの利用上限なし', '他クーポンとの併用不可'],
 }
 
 const FIVE_ZERO_DAYS = [5, 10, 15, 20, 25, 30] as const
@@ -144,17 +144,15 @@ export function buildFiveZeroCouponPlan(
     shopCode: FIVE_ZERO_TEMPLATE.shopCode,
     coupon: {
       couponName: `${month}/${Number(match[3])} 店舗限定5%OFF`,
-      couponCaption: 'Home Bliss店舗限定クーポン',
+      couponCaption: 'ホムブリス店舗限定クーポン',
       couponStartDate: `${occurrenceDate}T00:00:00+09:00`,
       couponEndDate: `${occurrenceDate}T23:59:59+09:00`,
-      issueCount: 100,
+      issueCount: 999_999_999,
       itemType: 4,
       discountType: 2,
       discountFactor: 5,
-      memberAvailMaxCount: 1,
-      multiRankCond: [0],
       combineFlag: 0,
-      displayFlag: 0,
+      displayFlag: 1,
     },
     calendarGeneration: {
       eventKey: FIVE_ZERO_EVENT_KEY,
@@ -166,7 +164,7 @@ export function buildFiveZeroCouponPlan(
       requiresOperatorApproval: true,
       sourceUrl: FIVE_ZERO_SOURCE_URL,
     },
-    notes: 'System-generated review draft. Operator must confirm the Rakuten campaign date, margin, issue count, wording, and issue timing before any RMS creation.',
+    notes: 'システム生成の確認用ドラフト。併用不可以外の利用条件は設定していません。issueCountはCouponAPI必須のため実質上限なしの値を設定しています。RMS登録前に発行枚数の受入可否を確認してください。',
     createdAt: generatedAt,
     updatedAt: generatedAt,
   }
@@ -197,9 +195,9 @@ export interface RakutenCouponForm {
 
 export const EMPTY_RAKUTEN_COUPON_FORM: RakutenCouponForm = {
   internalName: '', shopCode: 'homebliss', couponName: '', couponCaption: '',
-  couponStartDate: '', couponEndDate: '', couponImage: '', issueCount: '100',
-  itemType: 4, discountType: 2, discountFactor: '10', memberAvailMaxCount: '1',
-  multiRankCond: [0], combineFlag: 0, displayFlag: 0, itemUrls: '',
+  couponStartDate: '', couponEndDate: '', couponImage: '', issueCount: '999999999',
+  itemType: 4, discountType: 2, discountFactor: '10', memberAvailMaxCount: '',
+  multiRankCond: [0], combineFlag: 0, displayFlag: 1, itemUrls: '',
   minimumSpend: '', minimumQuantity: '', deviceCondition: '', notes: '',
 }
 
@@ -236,7 +234,7 @@ export function validateRakutenCouponForm(form: RakutenCouponForm): string[] {
     } catch { errors.push('couponImage must be a valid HTTP(S) URL.') }
   }
   if (!Number.isInteger(issueCount) || issueCount < 1) errors.push('issueCount must be an integer of at least 1.')
-  if (!Number.isInteger(memberMax) || memberMax < 1) errors.push('memberAvailMaxCount must be an integer of at least 1.')
+  if (form.memberAvailMaxCount && (!Number.isInteger(memberMax) || memberMax < 1)) errors.push('memberAvailMaxCount must be an integer of at least 1 when specified.')
   if (form.discountType === 1 && (!Number.isInteger(factor) || factor < 1)) errors.push('Fixed discountFactor must be a positive whole-yen amount.')
   if (form.discountType === 2 && (!Number.isInteger(factor) || factor < 1 || factor > 99)) errors.push('Percentage discountFactor must be an integer from 1 to 99.')
   if ((form.itemType === 5) !== (form.discountType === 4)) errors.push('itemType 5 and discountType 4 must be used together for free shipping.')
@@ -264,7 +262,8 @@ export function buildRakutenCouponPayload(form: RakutenCouponForm): RakutenCoupo
     ...(form.couponImage.trim() ? { couponImage: form.couponImage.trim() } : {}),
     issueCount: Number(form.issueCount), itemType: form.itemType, discountType: form.discountType,
     discountFactor: form.discountType === 4 ? 1 : Number(form.discountFactor),
-    memberAvailMaxCount: Number(form.memberAvailMaxCount), multiRankCond: [...form.multiRankCond],
+    ...(form.memberAvailMaxCount ? { memberAvailMaxCount: Number(form.memberAvailMaxCount) } : {}),
+    ...(form.multiRankCond.length === 1 && form.multiRankCond[0] === 0 ? {} : { multiRankCond: [...form.multiRankCond] }),
     combineFlag: form.combineFlag, displayFlag: form.displayFlag,
     ...(itemUrls.length ? { items: itemUrls.map(itemUrl => ({ itemUrl })) } : {}),
     ...(otherConditions.length ? { otherConditions } : {}),
@@ -280,12 +279,31 @@ export function formFromRakutenPlan(plan: RakutenCouponPlan): RakutenCouponForm 
     couponStartDate: withoutOffset(plan.coupon.couponStartDate), couponEndDate: withoutOffset(plan.coupon.couponEndDate),
     couponImage: plan.coupon.couponImage ?? '', issueCount: String(plan.coupon.issueCount),
     itemType: plan.coupon.itemType, discountType: plan.coupon.discountType,
-    discountFactor: String(plan.coupon.discountFactor), memberAvailMaxCount: String(plan.coupon.memberAvailMaxCount),
+    discountFactor: String(plan.coupon.discountFactor), memberAvailMaxCount: plan.coupon.memberAvailMaxCount === undefined ? '' : String(plan.coupon.memberAvailMaxCount),
     multiRankCond: [...(plan.coupon.multiRankCond ?? [0])], combineFlag: plan.coupon.combineFlag,
     displayFlag: plan.coupon.displayFlag, itemUrls: plan.coupon.items?.map(item => item.itemUrl).join('\n') ?? '',
     minimumSpend: condition('RS003'), minimumQuantity: condition('RS004'),
     deviceCondition: condition('RS001') as '' | '0' | '1', notes: plan.notes,
   }
+}
+
+export function isLegacyFiveZeroDefaultPlan(plan: RakutenCouponPlan, occurrenceDate: string): boolean {
+  const generation = plan.calendarGeneration
+  return generation?.eventKey === FIVE_ZERO_EVENT_KEY
+    && generation.occurrenceDate === occurrenceDate
+    && generation.templateId === FIVE_ZERO_TEMPLATE_ID
+    && generation.templateVersion === 1
+    && plan.status === 'publish_review'
+    && plan.coupon.couponCaption === 'Home Bliss店舗限定クーポン'
+    && plan.coupon.issueCount === 100
+    && plan.coupon.itemType === 4
+    && plan.coupon.discountType === 2
+    && plan.coupon.discountFactor === 5
+    && plan.coupon.memberAvailMaxCount === 1
+    && plan.coupon.combineFlag === 0
+    && plan.coupon.displayFlag === 0
+    && !plan.coupon.items?.length
+    && !plan.coupon.otherConditions?.length
 }
 
 export function updateModeForCoupon(plan: RakutenCouponPlan, now = new Date()): 'coupon.update' | 'coupon.patch' | 'none' {
