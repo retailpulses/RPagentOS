@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import {
-  apiOperationForStatus, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM,
-  formFromRakutenPlan, splitItemUrls, updateModeForCoupon, validateRakutenCouponForm,
+  apiOperationForStatus, buildFiveZeroCouponPlan, buildRakutenCouponPayload, EMPTY_RAKUTEN_COUPON_FORM,
+  FIVE_ZERO_TEMPLATE, fiveZeroOccurrences, formFromRakutenPlan, splitItemUrls, updateModeForCoupon, validateRakutenCouponForm,
   type RakutenCouponForm, type RakutenCouponPlan, type RakutenCouponWorkflowStatus,
   type RakutenDiscountType, type RakutenItemType, type RakutenRankCode,
 } from './rakuten-coupon-model'
 
 const STORAGE_KEY = 'rpagentos.rakuten-coupon-plans.v2'
+const AUGUST_REVIEW_OCCURRENCES = fiveZeroOccurrences(2026, 8)
+const AUGUST_25_REVIEW_PLAN = buildFiveZeroCouponPlan('2026-08-25', 'publish_review', '2026-08-24T09:00:00+09:00')
 const STATUS_LABELS: Record<RakutenCouponWorkflowStatus, string> = {
   draft: 'Draft', publish_review: 'Publish review', published: 'Published',
   cancellation_review: 'Cancellation review', cancelled: 'Cancelled',
@@ -20,9 +22,15 @@ const RANKS: Array<{ code: RakutenRankCode; label: string }> = [
 function loadPlans(): RakutenCouponPlan[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((plan): plan is RakutenCouponPlan =>
+    const stored = Array.isArray(parsed) ? parsed.filter((plan): plan is RakutenCouponPlan =>
       typeof plan === 'object' && plan !== null && typeof (plan as RakutenCouponPlan).id === 'string') : []
-  } catch { return [] }
+    const merged = stored.some(plan => plan.id === AUGUST_25_REVIEW_PLAN.id) ? stored : [AUGUST_25_REVIEW_PLAN, ...stored]
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+    return merged
+  } catch {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([AUGUST_25_REVIEW_PLAN]))
+    return [AUGUST_25_REVIEW_PLAN]
+  }
 }
 
 function cloneEmptyForm(): RakutenCouponForm {
@@ -76,6 +84,7 @@ export default function PromotionPlanner() {
       id: existing?.id ?? crypto.randomUUID(), status, internalName: form.internalName.trim(),
       shopCode: form.shopCode.trim(), coupon: buildRakutenCouponPayload(form),
       couponCode: existing?.couponCode, pcGetUrl: existing?.pcGetUrl,
+      calendarGeneration: existing?.calendarGeneration,
       notes: form.notes.trim(), createdAt: existing?.createdAt ?? now, updatedAt: now,
     }
     persist(existing ? plans.map(plan => plan.id === next.id ? next : plan) : [next, ...plans])
@@ -84,7 +93,15 @@ export default function PromotionPlanner() {
 
   const duplicatePlan = (plan: RakutenCouponPlan) => {
     const now = new Date().toISOString()
-    persist([{ ...plan, id: crypto.randomUUID(), internalName: `${plan.internalName} (copy)`, status: 'draft', couponCode: undefined, pcGetUrl: undefined, createdAt: now, updatedAt: now }, ...plans])
+    persist([{ ...plan, id: crypto.randomUUID(), internalName: `${plan.internalName} (copy)`, status: 'draft', couponCode: undefined, pcGetUrl: undefined, calendarGeneration: undefined, createdAt: now, updatedAt: now }, ...plans])
+  }
+
+  const generateCalendarDraft = (occurrenceDate: string) => {
+    const candidate = buildFiveZeroCouponPlan(occurrenceDate)
+    const existing = plans.find(plan => plan.id === candidate.id)
+    if (existing) { openEdit(existing); return }
+    persist([candidate, ...plans])
+    openEdit(candidate)
   }
 
   const setDiscountType = (discountType: RakutenDiscountType) => setForm(current => ({
@@ -121,6 +138,23 @@ export default function PromotionPlanner() {
       <button className="promotion-type-card" disabled><span>Ads / Campaign</span><small>Budget and campaign planning</small><em>Coming later</em></button>
     </section>
 
+    <section className="promotion-calendar card" aria-labelledby="promotion-calendar-title">
+      <div className="promotion-list-heading"><div><p className="promotion-eyebrow">Calendar-driven templates</p><h3 id="promotion-calendar-title">5と0のつく日 · August 2026</h3><p className="text-sm text-muted">System prepares drafts; an operator reviews and triggers RMS creation.</p></div><a className="btn btn-sm" href="https://event.rakuten.co.jp/card/pointday/" target="_blank" rel="noreferrer">Official campaign page ↗</a></div>
+      <div className="promotion-template-summary">
+        <div><span className="promotion-template-version">Template v{FIVE_ZERO_TEMPLATE.version}</span><strong>{FIVE_ZERO_TEMPLATE.name}</strong><small>{FIVE_ZERO_TEMPLATE.discountLabel}</small></div>
+        <ul>{FIVE_ZERO_TEMPLATE.guardrails.map(guardrail => <li key={guardrail}>{guardrail}</li>)}</ul>
+      </div>
+      <div className="promotion-occurrence-grid">{AUGUST_REVIEW_OCCURRENCES.map(occurrence => {
+        const plan = plans.find(value => value.calendarGeneration?.occurrenceDate === occurrence.date && value.calendarGeneration.templateId === FIVE_ZERO_TEMPLATE.id)
+        const isReviewTarget = occurrence.date === '2026-08-25'
+        return <article className={`promotion-occurrence ${isReviewTarget ? 'review-target' : ''}`} key={occurrence.date}>
+          <span>Aug</span><strong>{occurrence.day}</strong><small>{plan ? STATUS_LABELS[plan.status] : 'Available'}</small>
+          <button className={`btn btn-sm ${isReviewTarget ? 'btn-primary' : ''}`} onClick={() => generateCalendarDraft(occurrence.date)}>{plan ? 'Review plan' : 'Generate draft'}</button>
+        </article>
+      })}</div>
+      <p className="promotion-calendar-footnote"><strong>Aug 25 review draft is ready.</strong> The 5% discount, 100 issue limit, wording, margin and official event timing must be confirmed before any <code>coupon.issue</code> action.</p>
+    </section>
+
     <section className="promotion-workflow card">
       <div className="promotion-list-heading"><div><h3>Rakuten coupon lifecycle</h3><p className="text-sm text-muted">Internal approval states stay separate from RMS API state.</p></div></div>
       <div className="promotion-workflow-grid">{workflowSteps.map(([label, operation, description], index) => <div className="promotion-workflow-step" key={label}><span>{index + 1}</span><strong>{label}</strong><code>{operation}</code><small>{description}</small></div>)}</div>
@@ -132,7 +166,7 @@ export default function PromotionPlanner() {
       <div className="promotion-plan-grid">{filteredPlans.map(plan => <article className="promotion-plan-card" key={plan.id}>
         <div className="promotion-plan-topline"><span className={`promotion-status ${plan.status}`}>{STATUS_LABELS[plan.status]}</span><span className="promotion-discount">{discountLabel(plan)}</span></div>
         <h3>{plan.internalName}</h3><p className="promotion-customer-title">{plan.coupon.couponName} · {plan.coupon.couponCaption}</p>
-        <div className="promotion-platform-pills"><span className="promotion-platform rakuten">Rakuten · {plan.shopCode}</span><code>{apiOperationForStatus(plan.status)}</code></div>
+        <div className="promotion-platform-pills"><span className="promotion-platform rakuten">Rakuten · {plan.shopCode}</span>{plan.calendarGeneration && <span className="promotion-platform calendar">System · {plan.calendarGeneration.templateId} v{plan.calendarGeneration.templateVersion}</span>}<code>{apiOperationForStatus(plan.status)}</code></div>
         <dl className="promotion-plan-details"><div><dt>Starts</dt><dd>{formatSchedule(plan.coupon.couponStartDate)}</dd></div><div><dt>Ends</dt><dd>{formatSchedule(plan.coupon.couponEndDate)}</dd></div><div><dt>itemType</dt><dd>{plan.coupon.itemType} · {itemTypeLabel(plan.coupon.itemType)}</dd></div><div><dt>issueCount</dt><dd>{plan.coupon.issueCount.toLocaleString()}</dd></div>{plan.couponCode && <div><dt>couponCode</dt><dd>{plan.couponCode}</dd></div>}{plan.status === 'published' && <div><dt>Update mode</dt><dd>{updateModeForCoupon(plan)}</dd></div>}</dl>
         <div className="promotion-card-actions">{(plan.status === 'draft' || plan.status === 'publish_review') && <button className="btn btn-sm" onClick={() => openEdit(plan)}>Edit</button>}<button className="btn btn-sm" onClick={() => duplicatePlan(plan)}>Duplicate</button><button className="btn btn-sm" onClick={() => downloadJson(`rakuten-coupon-issue-${plan.id}.json`, plan.coupon)}>Export coupon.issue JSON</button></div>
       </article>)}</div>}

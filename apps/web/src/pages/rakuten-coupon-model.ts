@@ -9,6 +9,21 @@ export type RakutenItemType = 1 | 3 | 4 | 5
 export type RakutenDiscountType = 1 | 2 | 4
 export type RakutenRankCode = 0 | 1 | 2 | 3 | 4 | 5
 
+export const FIVE_ZERO_EVENT_KEY = 'rakuten_5_and_0_day' as const
+export const FIVE_ZERO_TEMPLATE_ID = 'five_zero_storewide_percent' as const
+export const FIVE_ZERO_TEMPLATE_VERSION = 1
+
+export interface RakutenCalendarGeneration {
+  eventKey: typeof FIVE_ZERO_EVENT_KEY
+  occurrenceDate: string
+  templateId: typeof FIVE_ZERO_TEMPLATE_ID
+  templateVersion: number
+  idempotencyKey: string
+  generatedBy: 'system'
+  requiresOperatorApproval: true
+  sourceUrl: string
+}
+
 export interface RakutenCouponItem { itemUrl: string }
 
 export interface RakutenOtherCondition {
@@ -42,9 +57,95 @@ export interface RakutenCouponPlan {
   coupon: RakutenCouponToIssue
   couponCode?: string
   pcGetUrl?: string
+  calendarGeneration?: RakutenCalendarGeneration
   notes: string
   createdAt: string
   updatedAt: string
+}
+
+export interface RakutenCalendarOccurrence {
+  date: string
+  day: number
+}
+
+export interface RakutenCouponTemplateDefinition {
+  id: typeof FIVE_ZERO_TEMPLATE_ID
+  version: number
+  name: string
+  eventKey: typeof FIVE_ZERO_EVENT_KEY
+  shopCode: string
+  discountLabel: string
+  guardrails: string[]
+}
+
+export const FIVE_ZERO_TEMPLATE: RakutenCouponTemplateDefinition = {
+  id: FIVE_ZERO_TEMPLATE_ID,
+  version: FIVE_ZERO_TEMPLATE_VERSION,
+  name: '5と0の日 · 店舗限定5%OFF',
+  eventKey: FIVE_ZERO_EVENT_KEY,
+  shopCode: 'homebliss',
+  discountLabel: 'Entire order · 5% off',
+  guardrails: ['Operator approval required', 'Margin confirmation required', 'No coupon combination', 'Hidden until RMS review'],
+}
+
+const FIVE_ZERO_DAYS = [5, 10, 15, 20, 25, 30] as const
+const FIVE_ZERO_SOURCE_URL = 'https://event.rakuten.co.jp/card/pointday/'
+
+export function fiveZeroOccurrences(year: number, month: number): RakutenCalendarOccurrence[] {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return []
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return FIVE_ZERO_DAYS.filter(day => day <= daysInMonth).map(day => ({
+    date: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    day,
+  }))
+}
+
+export function buildFiveZeroCouponPlan(
+  occurrenceDate: string,
+  status: 'draft' | 'publish_review' = 'draft',
+  generatedAt = new Date().toISOString(),
+): RakutenCouponPlan {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(occurrenceDate)
+  if (!match) throw new Error('occurrenceDate must use YYYY-MM-DD.')
+  const year = Number(match[1])
+  const month = Number(match[2])
+  if (!fiveZeroOccurrences(year, month).some(occurrence => occurrence.date === occurrenceDate)) {
+    throw new Error('occurrenceDate must be a valid 5と0のつく日 occurrence.')
+  }
+  const idempotencyKey = [FIVE_ZERO_TEMPLATE.shopCode, FIVE_ZERO_EVENT_KEY, occurrenceDate, FIVE_ZERO_TEMPLATE_ID, `v${FIVE_ZERO_TEMPLATE_VERSION}`].join(':')
+  return {
+    id: idempotencyKey,
+    status,
+    internalName: `${occurrenceDate} 5と0の日 店舗限定5%OFF`,
+    shopCode: FIVE_ZERO_TEMPLATE.shopCode,
+    coupon: {
+      couponName: `${month}/${Number(match[3])} 店舗限定5%OFF`,
+      couponCaption: 'Home Bliss店舗限定クーポン',
+      couponStartDate: `${occurrenceDate}T00:00:00+09:00`,
+      couponEndDate: `${occurrenceDate}T23:59:59+09:00`,
+      issueCount: 100,
+      itemType: 4,
+      discountType: 2,
+      discountFactor: 5,
+      memberAvailMaxCount: 1,
+      multiRankCond: [0],
+      combineFlag: 0,
+      displayFlag: 0,
+    },
+    calendarGeneration: {
+      eventKey: FIVE_ZERO_EVENT_KEY,
+      occurrenceDate,
+      templateId: FIVE_ZERO_TEMPLATE_ID,
+      templateVersion: FIVE_ZERO_TEMPLATE_VERSION,
+      idempotencyKey,
+      generatedBy: 'system',
+      requiresOperatorApproval: true,
+      sourceUrl: FIVE_ZERO_SOURCE_URL,
+    },
+    notes: 'System-generated review draft. Operator must confirm the Rakuten campaign date, margin, issue count, wording, and issue timing before any RMS creation.',
+    createdAt: generatedAt,
+    updatedAt: generatedAt,
+  }
 }
 
 export interface RakutenCouponForm {

@@ -953,6 +953,102 @@ input, textarea, select {
   font-size: 1rem;
 }
 
+.promotion-calendar {
+  margin-bottom: 1.5rem;
+}
+
+.promotion-template-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.2fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(191, 58, 43, 0.3);
+  border-radius: var(--radius-sm);
+  background: rgba(191, 58, 43, 0.07);
+}
+
+.promotion-template-summary strong,
+.promotion-template-summary small {
+  display: block;
+}
+
+.promotion-template-summary small,
+.promotion-template-summary li {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+}
+
+.promotion-template-summary ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 1.25rem;
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.promotion-template-version {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  color: #ffaaa2;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.promotion-occurrence-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.promotion-occurrence {
+  display: flex;
+  min-height: 145px;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.promotion-occurrence.review-target {
+  border-color: rgba(240, 156, 58, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(240, 156, 58, 0.14);
+}
+
+.promotion-occurrence > span,
+.promotion-occurrence > small {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+}
+
+.promotion-occurrence > strong {
+  margin: 0.1rem 0;
+  font-size: 1.4rem;
+}
+
+.promotion-occurrence > small {
+  margin-bottom: auto;
+}
+
+.promotion-occurrence .btn {
+  width: 100%;
+  margin-top: 0.6rem;
+}
+
+.promotion-calendar-footnote {
+  margin-top: 0.9rem;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+}
+
+.promotion-calendar-footnote strong {
+  color: #ffd29f;
+}
+
 .promotion-filters,
 .promotion-card-actions {
   display: flex;
@@ -1076,6 +1172,7 @@ input, textarea, select {
 }
 
 .promotion-platform.rakuten { color: #ffaaa2; background: rgba(191, 58, 43, 0.16); }
+.promotion-platform.calendar { color: #b8d1ff; background: rgba(79, 140, 255, 0.14); }
 .promotion-platform.amazon { color: #ffd19a; background: rgba(240, 156, 58, 0.16); }
 .promotion-platform.mercari { color: #ffb5b5; background: rgba(241, 76, 76, 0.14); }
 
@@ -1186,6 +1283,16 @@ input, textarea, select {
   color: var(--color-text-muted);
   font-size: 0.75rem;
   cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .promotion-occurrence-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .promotion-template-summary { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .promotion-occurrence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .promotion-template-summary ul { grid-template-columns: 1fr; }
 }
 
 .promotion-modal-backdrop {

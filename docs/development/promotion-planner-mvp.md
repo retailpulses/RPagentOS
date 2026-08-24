@@ -12,6 +12,13 @@ Time sale, Ads, and Campaign remain future promotion types.
 ## Current boundary
 
 - Browser-only drafts using localStorage key `rpagentos.rakuten-coupon-plans.v2`.
+- Calendar-driven `5と0のつく日` planning is enabled for August 2026. The
+  system deterministically seeds the August 25 plan in `publish_review` and
+  lets an operator generate other August occurrences without duplicates.
+- The initial versioned template is an entire-order, store-only 5% discount
+  with 100 issues, one use per member, no combination, and `displayFlag: 0`.
+  These are review defaults and require operator confirmation of campaign
+  timing, margin, copy, limits, and issue timing.
 - No Supabase writes and no marketplace API calls.
 - “Submit for publish review” changes only the local plan status.
 - JSON export is available for review and downstream API-contract work.
