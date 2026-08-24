@@ -69,6 +69,20 @@ jobs:
             | npx --yes wrangler@4.80.0 pages secret bulk \
                 --project-name rpagentos
 
+      - name: Remove retired account metrics token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if npx --yes wrangler@4.80.0 pages secret list --project-name rpagentos \
+            | grep -q 'ACCOUNT_METRICS_API_TOKEN'; then
+            printf 'y\n' \
+              | npx --yes wrangler@4.80.0 pages secret delete ACCOUNT_METRICS_API_TOKEN \
+                  --project-name rpagentos
+          else
+            echo "Retired account metrics token is already absent"
+          fi
+
       - name: Verify OrderMgmt catalog credential
         env:
           ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
