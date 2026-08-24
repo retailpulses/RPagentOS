@@ -49,48 +49,25 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/web/dist --project-name rpagentos --branch main
 
-      # Direct Pages deployments may refresh the production deployment config,
-      # so synchronize the secret after the deployment has been created.
-      - name: Synchronize OrderMgmt catalog API token
+      # Direct Pages deployments may refresh the production deployment config.
+      # Update all secrets atomically afterward so concurrent config deployments
+      # cannot finish out of order and leave production with a partial snapshot.
+      - name: Synchronize production API tokens
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ORDERMGMT_CATALOG_API_TOKEN: ${{ secrets.ORDERMGMT_CATALOG_API_TOKEN }}
-        run: |
-          if [ -z "$ORDERMGMT_CATALOG_API_TOKEN" ]; then
-            echo "::error::ORDERMGMT_CATALOG_API_TOKEN is not configured"
-            exit 1
-          fi
-          printf '%s\n' "$ORDERMGMT_CATALOG_API_TOKEN" \
-            | npx --yes wrangler@4.80.0 pages secret put ORDERMGMT_CATALOG_API_TOKEN \
-                --project-name rpagentos
-
-      - name: Synchronize listing copy internal API token
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           LISTING_COPY_INTERNAL_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
-        run: |
-          if [ -z "$LISTING_COPY_INTERNAL_API_TOKEN" ]; then
-            echo "::error::LISTING_COPY_INTERNAL_API_TOKEN is not configured"
-            exit 1
-          fi
-          printf '%s\n' "$LISTING_COPY_INTERNAL_API_TOKEN" \
-            | npx --yes wrangler@4.80.0 pages secret put INTERNAL_CATALOG_API_TOKEN \
-                --project-name rpagentos
-
-      - name: Synchronize account metrics manager token
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ACCOUNT_METRICS_API_TOKEN: ${{ secrets.ACCOUNT_METRICS_API_TOKEN }}
         run: |
-          if [ -z "$ACCOUNT_METRICS_API_TOKEN" ]; then
-            echo "::error::ACCOUNT_METRICS_API_TOKEN is not configured"
-            exit 1
-          fi
-          printf '%s\n' "$ACCOUNT_METRICS_API_TOKEN" \
-            | npx --yes wrangler@4.80.0 pages secret put ACCOUNT_METRICS_API_TOKEN \
+          for SECRET_NAME in ORDERMGMT_CATALOG_API_TOKEN LISTING_COPY_INTERNAL_API_TOKEN ACCOUNT_METRICS_API_TOKEN; do
+            if [ -z "${!SECRET_NAME}" ]; then
+              echo "::error::$SECRET_NAME is not configured"
+              exit 1
+            fi
+          done
+          node -e "process.stdout.write(JSON.stringify({ ORDERMGMT_CATALOG_API_TOKEN: process.env.ORDERMGMT_CATALOG_API_TOKEN, INTERNAL_CATALOG_API_TOKEN: process.env.LISTING_COPY_INTERNAL_API_TOKEN, ACCOUNT_METRICS_API_TOKEN: process.env.ACCOUNT_METRICS_API_TOKEN }))" \
+            | npx --yes wrangler@4.80.0 pages secret bulk \
                 --project-name rpagentos
 
       - name: Verify OrderMgmt catalog credential
