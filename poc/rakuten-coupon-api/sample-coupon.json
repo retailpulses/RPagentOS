@@ -1,0 +1,13 @@
+{
+  "couponName": "API POC（非表示）",
+  "couponCaption": "API接続検証用",
+  "couponStartDate": "2026-09-01T00:00:00+09:00",
+  "couponEndDate": "2026-09-02T23:59:59+09:00",
+  "issueCount": 1,
+  "itemType": 4,
+  "discountType": 2,
+  "discountFactor": 1,
+  "memberAvailMaxCount": 1,
+  "combineFlag": 0,
+  "displayFlag": 0
+}

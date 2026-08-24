@@ -45,6 +45,9 @@
     "job:listing:capture-copy-benchmark": "tsx src/jobs/capture-rakuten-copy-benchmark.ts",
     "job:listing:generic-copy-canary": "tsx src/jobs/run-generic-copy-canary.ts",
     "job:listing:send-copy-report": "tsx src/jobs/send-listing-copy-wecom-report.ts",
+    "poc:rakuten-coupon": "tsx poc/rakuten-coupon-api/rakuten-coupon-poc.ts",
+    "test:rakuten-coupon-poc": "tsx --test poc/rakuten-coupon-api/rakuten-coupon-poc.test.ts",
+    "test:promotion-planner": "tsx --test apps/web/src/pages/rakuten-coupon-model.test.ts",
     "import:all": "npm run import:product-master && npm run import:mercari && npm run import:rakuten && npm run import:amazon && npm run import:resolve-links && npm run import:validate"
   },
   "keywords": [],
