@@ -3,33 +3,17 @@ import test from 'node:test';
 import { handleAccountMetricsRequest, type AccountMetricsEnv } from './account-metrics.js';
 
 const env: AccountMetricsEnv = {
-  ACCOUNT_METRICS_API_TOKEN: 'manager-token',
   SUPABASE_URL: 'https://supabase.test',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role',
 };
 
-function request(token = 'manager-token', query = ''): Request {
-  return new Request(`https://agent.test/api/account-metrics${query}`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
+function request(query = ''): Request {
+  return new Request(`https://agent.test/api/account-metrics${query}`);
 }
 
-test('rejects unauthorized requests before querying Supabase', async () => {
-  let calls = 0;
-  const response = await handleAccountMetricsRequest(request('wrong'), env, async () => {
-    calls += 1;
-    return Response.json([]);
-  });
-
-  assert.equal(response.status, 401);
-  assert.equal(calls, 0);
-  assert.deepEqual(await response.json(), { error: 'unauthorized' });
-});
-
-test('returns 503 when the dedicated dashboard token is missing', async () => {
+test('returns 503 when the server-side Supabase configuration is missing', async () => {
   const response = await handleAccountMetricsRequest(request(), {
     SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
   });
   assert.equal(response.status, 503);
 });
@@ -37,7 +21,7 @@ test('returns 503 when the dedicated dashboard token is missing', async () => {
 test('returns accounts and monthly metrics with two bounded bulk reads', async () => {
   const urls: string[] = [];
   const response = await handleAccountMetricsRequest(
-    request('manager-token', '?platform=mercari&shop_code=shop4'),
+    request('?platform=mercari&shop_code=shop4'),
     env,
     async (input) => {
       const url = String(input);
@@ -96,7 +80,7 @@ test('does not issue a metric query when no active account matches', async () =>
 });
 
 test('rejects malformed filters', async () => {
-  const response = await handleAccountMetricsRequest(request('manager-token', '?shop_code=shop4%2Cstatus.eq.active'), env);
+  const response = await handleAccountMetricsRequest(request('?shop_code=shop4%2Cstatus.eq.active'), env);
   assert.equal(response.status, 400);
 });
 
