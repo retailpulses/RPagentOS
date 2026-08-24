@@ -17,6 +17,7 @@ import {
   type PublishClaimResult,
   type PublishFinalizationResult,
   type PublishReleaseResult,
+  type OperatorTextPublishResult,
   type ListingLifecycleResult,
   type ListingObservationsResponse,
   type ListingsStageQueryResponse,
@@ -99,7 +100,7 @@ async function fetchSingleListing(
         'external_listing_id', 'listing_status',
         'lifecycle_stage', 'content_revision', 'content_origin',
         'title', 'description', 'images',
-        'score_total', 'scored_content_revision',
+        'score_total', 'score_modules', 'scored_content_revision', 'scored_at',
         'publish_claim_id', 'publish_idempotency_key', 'publish_claimed_at',
         'published_content_revision',
         'enhancement_key',
@@ -431,7 +432,12 @@ export async function handleListingContentUpdate(
     return json({ error: 'invalid_content_origin', message: 'must be ai_enhanced or operator' }, 400);
   }
 
-  const idempotencyKey = requireNonEmptyString(req.idempotency_key, 'idempotency_key', 256);
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireNonEmptyString(req.idempotency_key, 'idempotency_key', 256);
+  } catch (error) {
+    return json({ error: (error as Error).message }, 400);
+  }
 
   const supabaseEnv = {
     SUPABASE_URL: env.SUPABASE_URL!,
@@ -707,6 +713,132 @@ export async function handleListingsStageQuery(
     console.error('stage-query failed', error);
     return json({ error: 'catalog_upstream_error' }, 502);
   }
+}
+
+// ── Operator-confirmed atomic text publication ───────────────────────
+
+export async function handleOperatorTextPublish(
+  request: Request,
+  env: InternalCatalogEnv,
+  listingId: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' });
+  if (!pipelineConfigurationReady(env)) return json({ error: 'service_not_configured' }, 503);
+  if (!pipelineAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
+  if (!env.CATALOGSYNC_RELAY_URL || !env.CATALOGSYNC_RELAY_SECRET) {
+    return json({ error: 'publisher_not_configured' }, 503);
+  }
+  try { requireUuid(listingId, 'listing_id'); } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+
+  let body: unknown;
+  try { body = await request.json(); } catch { return json({ error: 'invalid_json' }, 400); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'invalid_request' }, 400);
+  const req = body as Record<string, unknown>;
+  if (req.operator_confirmed !== true) return json({ error: 'operator_confirmation_required' }, 400);
+  const expectedRevision = req.expected_content_revision;
+  if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
+    return json({ error: 'invalid_expected_revision' }, 400);
+  }
+  const requestedFields = Array.isArray(req.fields) ? req.fields : [];
+  const fields = [...new Set(requestedFields)].filter(
+    (field): field is 'title' | 'description' => field === 'title' || field === 'description',
+  );
+  if (fields.length === 0 || fields.length !== requestedFields.length) {
+    return json({ error: 'invalid_publish_fields' }, 400);
+  }
+  const publishValues: Record<string, string> = {};
+  try {
+    if (fields.includes('title')) publishValues.title = requireNonEmptyString(req.title, 'title', 130);
+    if (fields.includes('description')) {
+      publishValues.description = requireNonEmptyString(req.description, 'description', 5000);
+    }
+  } catch (error) {
+    return json({ error: (error as Error).message }, 400);
+  }
+  const idempotencyKey = requireNonEmptyString(req.idempotency_key, 'idempotency_key', 256);
+  const supabaseEnv = {
+    SUPABASE_URL: env.SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY!,
+  };
+  const listing = await fetchSingleListing(supabaseEnv, listingId, fetchFn);
+  if (!listing) return json({ error: 'listing_not_found' }, 404);
+  if (listing.platform !== 'mercari' || typeof listing.external_listing_id !== 'string') {
+    return json({ error: 'listing_not_publishable' }, 409);
+  }
+  const currentRevision = typeof listing.content_revision === 'number' ? listing.content_revision : 1;
+  if (listing.publish_idempotency_key === idempotencyKey && !listing.publish_claim_id) {
+    return json({ listing_id: listingId, content_revision: currentRevision, published_fields: fields,
+      warnings: [], outcome: 'replay' } satisfies OperatorTextPublishResult);
+  }
+  if (currentRevision !== expectedRevision || listing.publish_claim_id) {
+    return json({ listing_id: listingId, content_revision: currentRevision, published_fields: [],
+      warnings: [], outcome: 'stale' } satisfies OperatorTextPublishResult, 409);
+  }
+  if (listing.lifecycle_stage === 'retired') {
+    return json({ listing_id: listingId, content_revision: currentRevision, published_fields: [],
+      warnings: [], outcome: 'not_eligible' } satisfies OperatorTextPublishResult, 409);
+  }
+
+  const warnings: string[] = [];
+  const score = typeof listing.score_total === 'number' ? listing.score_total : null;
+  const scoredRevision = typeof listing.scored_content_revision === 'number'
+    ? listing.scored_content_revision : null;
+  if (score === null) warnings.push('listing_not_scored');
+  else if (score < 75) warnings.push('score_below_recommended_threshold');
+  if (scoredRevision !== currentRevision) warnings.push('score_is_stale');
+
+  const claimId = crypto.randomUUID();
+  const stageBefore = String(listing.lifecycle_stage || 'draft');
+  const claimed = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+    lifecycle_stage: 'publish_pending', publish_claim_id: claimId,
+    publish_idempotency_key: idempotencyKey, publish_claimed_at: new Date().toISOString(),
+  }, fetchFn, expectedRevision, ['publish_claim_id=is.null', 'lifecycle_stage=neq.retired']);
+  if (!claimed) {
+    return json({ listing_id: listingId, content_revision: currentRevision, published_fields: [],
+      warnings, outcome: 'stale' } satisfies OperatorTextPublishResult, 409);
+  }
+
+  let relayResult: Record<string, unknown>;
+  try {
+    const relayResponse = await fetchFn(`${env.CATALOGSYNC_RELAY_URL.replace(/\/$/, '')}/marketplace/mercari`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-relay-secret': env.CATALOGSYNC_RELAY_SECRET },
+      body: JSON.stringify({ action: 'listing-text-update', dryRun: false, payload: {
+        shopCode: listing.shop_code, listingId: listing.external_listing_id, fields: publishValues,
+      } }),
+    });
+    relayResult = await relayResponse.json() as Record<string, unknown>;
+    if (!relayResponse.ok || relayResult.ok !== true) throw new Error('relay_rejected');
+  } catch {
+    await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, {
+      lifecycle_stage: stageBefore, publish_claim_id: null, publish_claimed_at: null,
+      publish_idempotency_key: null,
+    }, fetchFn, undefined, [`publish_claim_id=eq.${claimId}`]);
+    return json({ listing_id: listingId, content_revision: currentRevision, published_fields: [],
+      warnings, outcome: 'publish_failed' } satisfies OperatorTextPublishResult, 502);
+  }
+
+  const observed = relayResult.observed && typeof relayResult.observed === 'object'
+    ? relayResult.observed as Record<string, unknown> : {};
+  const now = new Date().toISOString();
+  const nextRevision = currentRevision + 1;
+  const patch: Record<string, unknown> = {
+    ...publishValues, lifecycle_stage: 'published', content_revision: nextRevision,
+    content_origin: 'operator', published_content_revision: nextRevision, published_at: now,
+    observed_at: now, platform_updated_at: now, content_drift: false,
+    score_total: null, score_modules: null, scored_content_revision: null, scored_at: null,
+    score_config_version: null, score_config_hash: null,
+    publish_claim_id: null, publish_claimed_at: null,
+  };
+  if (fields.includes('title')) patch.observed_title = observed.title ?? publishValues.title;
+  if (fields.includes('description')) patch.observed_description = observed.description ?? publishValues.description;
+  const finalized = await postgrestPatch(supabaseEnv, 'platform_listings', 'id', listingId, patch, fetchFn,
+    expectedRevision, [`publish_claim_id=eq.${claimId}`, 'lifecycle_stage=eq.publish_pending']);
+  if (!finalized) return json({ error: 'external_publish_requires_reconciliation' }, 502);
+  return json({ listing_id: listingId, content_revision: nextRevision, published_fields: fields,
+    warnings, outcome: 'published' } satisfies OperatorTextPublishResult);
 }
 
 // ── 5. Publication Claim ──────────────────────────────────────────────
