@@ -13,6 +13,7 @@
 ## Account Metrics MVP
 
 - `/metrics` shows complete-month KPIs, trends, monthly history, and deterministic management signals for active platform accounts.
+- The default “All Mercari Shops” view combines shop1–shop4 only for months where every shop has exactly one valid complete metric row. Additive KPIs are summed; CVR and purchase value are derived from combined totals.
 - Partial periods are displayed as provisional context but excluded from month-over-month comparisons and signal generation.
 - The browser calls the same-origin public read-only `/api/account-metrics` Pages Function; the Supabase `service_role` credential remains server-side.
 - “Plan task” and “Start project” prefill the existing forms with account and signal context. A manager must review and submit them manually; the dashboard performs no marketplace action.

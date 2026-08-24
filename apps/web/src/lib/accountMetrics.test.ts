@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { PlatformAccountMonthlyMetric } from '../../../../src/lib/account-metrics-types.js'
-import { buildManagementSignals, latestCompleteComparison } from './accountMetrics.js'
+import { aggregateCompleteAccountMetrics, buildManagementSignals, latestCompleteComparison } from './accountMetrics.js'
 
 function metric(
   period: string,
@@ -71,4 +71,37 @@ test('offers a bounded growth experiment when no decline threshold is crossed', 
   ])
 
   assert.deepEqual(signals.map((signal) => signal.key), ['growth-opportunity'])
+})
+
+test('combines a period only when every account has one valid complete metric', () => {
+  const accountIds = ['shop1', 'shop2', 'shop3', 'shop4']
+  const rows = accountIds.map((accountId, index) => metric('2026-07', {
+    id: `${accountId}:2026-07`,
+    platform_account_id: accountId,
+    sales_amount: 100_000 + index * 10_000,
+    visitor_count: 10_000 + index * 1_000,
+    estimated_purchaser_count: 20 + index,
+    new_follower_count: 100 + index * 10,
+  }))
+
+  const [combined] = aggregateCompleteAccountMetrics(rows, accountIds)
+  assert.equal(combined.sales_amount, 460_000)
+  assert.equal(combined.visitor_count, 46_000)
+  assert.equal(combined.estimated_purchaser_count, 86)
+  assert.equal(combined.new_follower_count, 460)
+  assert.equal(combined.estimated_conversion_rate, 86 / 46_000)
+  assert.equal(combined.average_purchase_value, 460_000 / 86)
+})
+
+test('excludes combined periods with a missing, partial, duplicate, or invalid shop row', () => {
+  const accountIds = ['shop1', 'shop2', 'shop3', 'shop4']
+  const baseRows = accountIds.map((accountId) => metric('2026-07', {
+    id: `${accountId}:2026-07`,
+    platform_account_id: accountId,
+  }))
+
+  assert.equal(aggregateCompleteAccountMetrics(baseRows.slice(0, 3), accountIds).length, 0)
+  assert.equal(aggregateCompleteAccountMetrics(baseRows.map((row) => row.platform_account_id === 'shop4' ? { ...row, coverage_status: 'partial' } : row), accountIds).length, 0)
+  assert.equal(aggregateCompleteAccountMetrics([...baseRows, { ...baseRows[0], id: 'duplicate' }], accountIds).length, 0)
+  assert.equal(aggregateCompleteAccountMetrics(baseRows.map((row) => row.platform_account_id === 'shop4' ? { ...row, estimated_purchaser_count: null } : row), accountIds).length, 0)
 })
