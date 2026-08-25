@@ -4,7 +4,7 @@ compatibility_date = "2026-07-02"
 pages_build_output_dir = "apps/web/dist"
 
 [vars]
-MAIN_IMAGE_ASSET_PUBLIC_BASE_URL = "https://listing.homesbliss.net/api/images"
+MAIN_IMAGE_ASSET_PUBLIC_BASE_URL = "https://rpagentos.pages.dev/api/main-image-assets"
 
 [[r2_buckets]]
 binding = "MAIN_IMAGE_ASSETS"

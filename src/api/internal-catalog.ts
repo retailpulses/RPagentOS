@@ -12,6 +12,11 @@ export interface InternalCatalogEnv {
   MAIN_IMAGE_CANDIDATE_SIGNING_SECRET?: string;
   MAIN_IMAGE_ASSET_PUBLIC_BASE_URL?: string;
   MAIN_IMAGE_ASSETS?: {
+    get(key: string): Promise<{
+      body: ReadableStream<Uint8Array>;
+      httpMetadata?: { contentType?: string };
+      httpEtag?: string;
+    } | null>;
     head(key: string): Promise<unknown | null>;
     put(
       key: string,
@@ -3035,4 +3040,5 @@ export {
   handleMainImageCandidate,
   handleMainImageAssetSave,
   handleOperatorMainImagePublish,
+  handleMainImageAssetDelivery,
 } from './internal-catalog-main-image.js';

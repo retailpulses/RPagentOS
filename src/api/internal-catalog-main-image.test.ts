@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   handleMainImageAssetSave,
+  handleMainImageAssetDelivery,
   handleMainImageCandidate,
   handleMainImageContext,
   handleMainImageSchema,
@@ -31,6 +32,11 @@ function jpegBytes(width = 1024, height = 1024): Uint8Array {
 
 function encodeBase64(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
+}
+
+function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new Blob([buffer]).stream();
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -283,6 +289,10 @@ test('candidate generation, explicit R2 save, and exact-listing publish complete
   const stored = new Map<string, Uint8Array>();
   const runtimeEnv = env({
     MAIN_IMAGE_ASSETS: {
+      async get(key) {
+        const value = stored.get(key);
+        return value ? { body: byteStream(value), httpMetadata: { contentType: 'image/jpeg' } } : null;
+      },
       async head(key) { return stored.has(key) ? {} : null; },
       async put(key, value) { stored.set(key, value); return {}; },
       async delete(key) { stored.delete(key); },
@@ -446,6 +456,7 @@ test('asset save rejects candidate substitution before writing R2', async () => 
   let wrote = false;
   const runtimeEnv = env({
     MAIN_IMAGE_ASSETS: {
+      async get() { return null; },
       async head() { return null; },
       async put() { wrote = true; return {}; },
       async delete() {},
@@ -492,6 +503,7 @@ test('asset save bounds operator overrides before external writes', async () => 
   let wrote = false;
   const runtimeEnv = env({
     MAIN_IMAGE_ASSETS: {
+      async get() { return null; },
       async head() { return null; },
       async put() { wrote = true; return {}; },
       async delete() {},
@@ -521,6 +533,10 @@ test('asset save removes the immutable R2 object when metadata insertion fails',
   const stored = new Map<string, Uint8Array>();
   const runtimeEnv = env({
     MAIN_IMAGE_ASSETS: {
+      async get(key) {
+        const value = stored.get(key);
+        return value ? { body: byteStream(value), httpMetadata: { contentType: 'image/jpeg' } } : null;
+      },
       async head(key) { return stored.has(key) ? {} : null; },
       async put(key, value) { stored.set(key, value); return {}; },
       async delete(key) { stored.delete(key); },
@@ -555,4 +571,33 @@ test('asset save removes the immutable R2 object when metadata insertion fails',
   );
   assert.equal(response.status, 502);
   assert.equal(stored.size, 0);
+});
+
+test('public asset delivery serves only immutable RPagentOS main-image keys', async () => {
+  const bytes = jpegBytes();
+  const key = 'products/WAGON-BEIGE/main-images/asset-id/v1.jpg';
+  const runtimeEnv = env({
+    MAIN_IMAGE_ASSETS: {
+      async get(requested) {
+        return requested === key
+          ? { body: byteStream(bytes), httpMetadata: { contentType: 'image/jpeg' }, httpEtag: 'etag-1' }
+          : null;
+      },
+      async head() { return null; },
+      async put() { return {}; },
+      async delete() {},
+    },
+  });
+  const response = await handleMainImageAssetDelivery(
+    new Request(`https://rpagentos.pages.dev/api/main-image-assets/${key}`), runtimeEnv, key,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(response.headers.get('etag'), 'etag-1');
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+
+  const rejected = await handleMainImageAssetDelivery(
+    new Request('https://rpagentos.pages.dev/api/main-image-assets/other/file.jpg'), runtimeEnv, 'other/file.jpg',
+  );
+  assert.equal(rejected.status, 404);
 });

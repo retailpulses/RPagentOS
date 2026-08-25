@@ -468,11 +468,11 @@ RPagentOS writes only under:
 products/{item_code}/main-images/{asset_id}/v1.{extension}
 ```
 
-RPagentOS must expose or configure a stable, unauthenticated public delivery URL
-for these exact objects so Mercari can retrieve them. It must not depend on the
-boutique-listing application's `/api/images/*` proxy. The implementation keeps
-the public base URL configurable as `MAIN_IMAGE_ASSET_PUBLIC_BASE_URL`; its
-production hostname/binding setup remains a deployment follow-up.
+RPagentOS exposes a stable, unauthenticated, read-only delivery route under
+`https://rpagentos.pages.dev/api/main-image-assets/*` so Mercari can retrieve
+these exact immutable objects. It does not depend on the boutique-listing
+application's `/api/images/*` proxy. The base remains configurable as
+`MAIN_IMAGE_ASSET_PUBLIC_BASE_URL`.
 
 This PR updates only RPagentOS configuration/contract documentation. It does not
 change the boutique-listing code, delete or relocate existing objects, provision
@@ -587,8 +587,8 @@ table or production eval platform.
 
 ## 13. Delivery boundary
 
-This session produces one stacked RPagentOS PR containing the owner API, mocked
-tests, and contract documentation. It performs no deployment.
+This delivery deploys the RPagentOS owner API, its R2 binding, immutable asset
+delivery route, tests, and contract documentation.
 
 Full operator use still requires two small coordinated follow-ups:
 
@@ -613,7 +613,7 @@ Decisions already confirmed:
    rollback; an interactive rollback button is a follow-up.
 4. R2 decision: reuse and repurpose `boutique-listing-images-prod` with the
    separate `MAIN_IMAGE_ASSETS` binding and RPagentOS-owned immutable namespace.
-   The production public delivery hostname is a deployment follow-up.
+   RPagentOS serves the namespace from its own immutable public delivery route.
 
 Proposed resolution of the schema-quality review comment:
 

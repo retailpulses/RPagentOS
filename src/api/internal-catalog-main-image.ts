@@ -744,6 +744,40 @@ export async function handleMainImageAssetSave(
   } catch (error) { return responseForError(error); }
 }
 
+function deliveryObjectKey(path: string | string[] | undefined): string | null {
+  const segments = (Array.isArray(path) ? path : typeof path === 'string' ? [path] : [])
+    .flatMap((part) => part.split('/'));
+  if (segments.length === 0 || segments.some((part) => !part || part === '.' || part === '..')) return null;
+  const key = segments.join('/');
+  if (key.length > 1024 || !key.startsWith('products/') || !key.endsWith('.jpg')) return null;
+  return key;
+}
+
+export async function handleMainImageAssetDelivery(
+  request: Request,
+  env: InternalCatalogEnv,
+  path: string | string[] | undefined,
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, { allow: 'GET' });
+  if (!env.MAIN_IMAGE_ASSETS) return json({ error: 'asset_storage_not_configured' }, 503);
+  const key = deliveryObjectKey(path);
+  if (!key) return json({ error: 'asset_not_found' }, 404);
+  try {
+    const object = await env.MAIN_IMAGE_ASSETS.get(key);
+    if (!object) return json({ error: 'asset_not_found' }, 404);
+    const headers = new Headers({
+      'content-type': object.httpMetadata?.contentType || 'image/jpeg',
+      'cache-control': 'public, max-age=31536000, immutable',
+      'access-control-allow-origin': '*',
+      'x-content-type-options': 'nosniff',
+    });
+    if (object.httpEtag) headers.set('etag', object.httpEtag);
+    return new Response(object.body, { headers });
+  } catch (error) {
+    return responseForError(error);
+  }
+}
+
 function replaceMainImage(first: string, existing: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
