@@ -1,6 +1,6 @@
 # Inquiry-Linked Main Image — Lean MVP Design
 
-Status: **Approved for implementation — no deployment has started**
+Status: **Implementation complete — production deployment approved**
 
 Tracking issue: [retailpulses/RPagentOS#74](https://github.com/retailpulses/RPagentOS/issues/74)
 
@@ -67,7 +67,6 @@ The MVP does **not** include:
 - Rakuten publishing
 - Bulk SPU processing
 - A/B testing or automatic image scoring
-- Production deployment or secret/bucket provisioning
 
 These can be added only after operators prove the basic flow is useful.
 

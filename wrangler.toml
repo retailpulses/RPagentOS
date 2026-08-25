@@ -3,4 +3,11 @@ name = "rpagentos"
 compatibility_date = "2026-07-02"
 pages_build_output_dir = "apps/web/dist"
 
+[vars]
+MAIN_IMAGE_ASSET_PUBLIC_BASE_URL = "https://listing.homesbliss.net/api/images"
+
+[[r2_buckets]]
+binding = "MAIN_IMAGE_ASSETS"
+bucket_name = "boutique-listing-images-prod"
+
 [env.production]
