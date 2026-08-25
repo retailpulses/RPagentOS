@@ -4,6 +4,8 @@ export interface InternalCatalogEnv {
   ORDERMGMT_CATALOG_API_TOKEN?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  CATALOGSYNC_RELAY_URL?: string;
+  CATALOGSYNC_RELAY_SECRET?: string;
 }
 
 export interface CatalogSkuResponse {
@@ -321,6 +323,14 @@ export interface PublishReleaseRequest {
 export interface PublishReleaseResult {
   listing_id: string;
   outcome: 'released' | 'claim_not_found' | 'not_pending';
+}
+
+export interface OperatorTextPublishResult {
+  listing_id: string;
+  content_revision: number;
+  published_fields: Array<'title' | 'description'>;
+  warnings: string[];
+  outcome: 'published' | 'replay' | 'stale' | 'not_eligible' | 'publish_failed';
 }
 
 export interface RetireListingRequest {
@@ -2999,6 +3009,7 @@ export {
   handlePublishClaim,
   handlePublishFinalization,
   handlePublishRelease,
+  handleOperatorTextPublish,
   handleRetireListing,
   handleRestoreListing,
   handleListingObservationsBatch,
