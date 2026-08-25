@@ -129,6 +129,31 @@ jobs:
           echo "::error::Listing copy credential smoke failed (expected authenticated 400, got $STATUS)"
           exit 1
 
+      - name: Verify main image production bindings
+        env:
+          LISTING_COPY_INTERNAL_API_TOKEN: ${{ secrets.LISTING_COPY_INTERNAL_API_TOKEN }}
+        run: |
+          ASSET_STATUS=""
+          SCHEMA_STATUS=""
+          for ATTEMPT in 1 2 3 4 5; do
+            ASSET_STATUS=$(curl -sS -o /tmp/main-image-asset-smoke.json -w '%{http_code}' \
+              'https://rpagentos.pages.dev/api/main-image-assets/products/smoke/main-images/missing/v1.jpg')
+            SCHEMA_STATUS=$(curl -sS -o /tmp/main-image-schema-smoke.json -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $LISTING_COPY_INTERNAL_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{"expected_content_revision":1}' \
+              'https://rpagentos.pages.dev/api/internal/catalog/listings/11111111-1111-4111-8111-111111111111/main-image-schema')
+            if [ "$ASSET_STATUS" = "404" ] && [ "$SCHEMA_STATUS" = "404" ]; then
+              echo "Main image R2 binding and generation configuration available in production"
+              exit 0
+            fi
+            echo "Attempt $ATTEMPT/5 returned asset=$ASSET_STATUS schema=$SCHEMA_STATUS; retrying"
+            sleep 3
+          done
+          echo "::error::Main image smoke failed (expected asset=404 and schema=404, got asset=$ASSET_STATUS schema=$SCHEMA_STATUS)"
+          exit 1
+
       - name: Verify public account metrics endpoint
         run: |
           STATUS=""
