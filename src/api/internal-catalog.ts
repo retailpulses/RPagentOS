@@ -6,6 +6,25 @@ export interface InternalCatalogEnv {
   SUPABASE_SERVICE_ROLE_KEY?: string;
   CATALOGSYNC_RELAY_URL?: string;
   CATALOGSYNC_RELAY_SECRET?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_SCHEMA_MODEL?: string;
+  OPENAI_IMAGE_MODEL?: string;
+  MAIN_IMAGE_CANDIDATE_SIGNING_SECRET?: string;
+  MAIN_IMAGE_ASSET_PUBLIC_BASE_URL?: string;
+  MAIN_IMAGE_ASSETS?: {
+    get(key: string): Promise<{
+      body: ReadableStream<Uint8Array>;
+      httpMetadata?: { contentType?: string };
+      httpEtag?: string;
+    } | null>;
+    head(key: string): Promise<unknown | null>;
+    put(
+      key: string,
+      value: Uint8Array,
+      options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
+    ): Promise<unknown>;
+    delete(key: string): Promise<void>;
+  };
 }
 
 export interface CatalogSkuResponse {
@@ -3014,3 +3033,12 @@ export {
   handleRestoreListing,
   handleListingObservationsBatch,
 } from "./internal-catalog-lifecycle.js";
+
+export {
+  handleMainImageContext,
+  handleMainImageSchema,
+  handleMainImageCandidate,
+  handleMainImageAssetSave,
+  handleOperatorMainImagePublish,
+  handleMainImageAssetDelivery,
+} from './internal-catalog-main-image.js';
