@@ -37,6 +37,7 @@ function mockFullFetch(opts: {
   listings?: Array<{
     id: string;
     variant_id: string | null;
+    platform_account_id?: string | null;
     listing_status: string | null;
     raw_payload?: Record<string, unknown> | null;
     external_listing_id?: string | null;
@@ -72,9 +73,14 @@ function mockFullFetch(opts: {
       return Response.json(opts.skus ?? []);
     }
 
+    if (url.includes('/platform_accounts?')) {
+      return Response.json([{ id: 'account-shop1', platform: 'mercari', shop_code: 'shop1', status: 'active' }]);
+    }
+
     if (url.includes('/platform_listings?')) {
       return Response.json((opts.listings ?? []).map((l) => ({
         ...l,
+        platform_account_id: l.platform_account_id === undefined ? 'account-shop1' : l.platform_account_id,
         external_listing_id: l.external_listing_id === undefined ? 'mercari-prod-1' : l.external_listing_id,
         platform: l.platform ?? 'mercari',
         shop_code: l.shop_code ?? 'shop1',
@@ -178,6 +184,9 @@ test('accepts exactly 100 updates', async () => {
       }
       if (url.includes('/platform_listing_skus?')) {
         return Response.json([]);
+      }
+      if (url.includes('/platform_accounts?')) {
+        return Response.json([{ id: 'account-shop1', platform: 'mercari', shop_code: 'shop1', status: 'active' }]);
       }
       if (url.includes('/platform_listings?')) {
         return Response.json([]);
@@ -456,6 +465,42 @@ test('returns unchanged for idempotent retry with matching key', async () => {
   assert.equal(body.results[0].result, 'unchanged');
 });
 
+test('repairs a missing platform account link even when the idempotency key matches', async () => {
+  const writtenListings: Array<Record<string, unknown>> = [];
+  const baseFetch = mockFullFetch({
+    variants: [{ id: 'v1', item_code: 'N511P407695W' }],
+    listings: [{
+      id: 'listing-1',
+      variant_id: 'v1',
+      platform_account_id: null,
+      listing_status: 'UNOPENED',
+      raw_payload: { catalogsync_listing_state: { idempotency_key: 'idem-key-1' } },
+    }],
+    skus: [{
+      listing_id: 'listing-1',
+      external_sku_id: 'mercari-sku-1',
+      sku_code: 'N511P407695W',
+    }],
+  });
+  const response = await handleListingStateBatch(
+    request({ updates: [validUpdate()] }),
+    env,
+    async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST' && url.includes('/platform_listings')) {
+        const rows = JSON.parse(init.body as string) as Array<Record<string, unknown>>;
+        writtenListings.push(...rows);
+        return Response.json(rows.map((row) => ({ id: 'listing-1', ...row })));
+      }
+      return baseFetch(input, init);
+    },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { results: Record<string, unknown>[] };
+  assert.equal(body.results[0].result, 'updated');
+  assert.equal(writtenListings[0].platform_account_id, 'account-shop1');
+});
+
 test('creates a new UNOPENED listing with both table writes', async () => {
   const writtenListings: Array<Record<string, unknown>> = [];
   const writtenSkus: Array<Record<string, unknown>> = [];
@@ -482,6 +527,9 @@ test('creates a new UNOPENED listing with both table writes', async () => {
       if (url.includes('/product_variants?')) {
         return Response.json([{ id: 'v1', item_code: 'N511P407695W' }]);
       }
+      if (url.includes('/platform_accounts?')) {
+        return Response.json([{ id: 'account-shop1', platform: 'mercari', shop_code: 'shop1', status: 'active' }]);
+      }
       return Response.json([]);
     },
   );
@@ -490,6 +538,7 @@ test('creates a new UNOPENED listing with both table writes', async () => {
   const body = await response.json() as { results: Record<string, unknown>[] };
   assert.equal(body.results[0].result, 'created');
   assert.equal(writtenListings.length, 1);
+  assert.equal(writtenListings[0].platform_account_id, 'account-shop1');
   assert.equal(writtenSkus.length, 1);
   const listingPayload = writtenListings[0].raw_payload as Record<string, unknown>;
   const state = listingPayload.catalogsync_listing_state as Record<string, unknown>;
