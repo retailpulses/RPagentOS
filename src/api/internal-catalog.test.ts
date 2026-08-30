@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleCatalogSkuRequest, type InternalCatalogEnv } from './internal-catalog.js';
+import {
+  handleCatalogSkuRequest,
+  inquiryCatalogAuthorized,
+  inquiryCatalogConfigurationReady,
+  type InternalCatalogEnv,
+} from './internal-catalog.js';
 
 const env: InternalCatalogEnv = {
   INTERNAL_CATALOG_API_TOKEN: 'catalog-token',
@@ -15,6 +20,17 @@ function request(token = 'catalog-token', method = 'GET'): Request {
     headers: { authorization: `Bearer ${token}` },
   });
 }
+
+test('scopes a dedicated Inquiry credential without requiring the broad internal token', () => {
+  const inquiryEnv: InternalCatalogEnv = {
+    INQUIRY_CATALOG_API_TOKEN: 'inquiry-token',
+    SUPABASE_URL: 'https://catalog.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+  };
+  assert.equal(inquiryCatalogConfigurationReady(inquiryEnv), true);
+  assert.equal(inquiryCatalogAuthorized(request('inquiry-token'), inquiryEnv), true);
+  assert.equal(inquiryCatalogAuthorized(request('wrong'), inquiryEnv), false);
+});
 
 test('rejects unauthorized requests without reading Supabase', async () => {
   let calls = 0;
