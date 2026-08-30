@@ -26,6 +26,8 @@ import {
   bearerToken,
   pipelineAuthorized,
   pipelineConfigurationReady,
+  inquiryCatalogAuthorized,
+  inquiryCatalogConfigurationReady,
   postgrestIn,
   postgrestExactIlikeOr,
   identityKey,
@@ -724,8 +726,8 @@ export async function handleOperatorTextPublish(
   fetchFn: typeof fetch = fetch,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { allow: 'POST' });
-  if (!pipelineConfigurationReady(env)) return json({ error: 'service_not_configured' }, 503);
-  if (!pipelineAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
+  if (!inquiryCatalogConfigurationReady(env)) return json({ error: 'service_not_configured' }, 503);
+  if (!inquiryCatalogAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
   if (!env.CATALOGSYNC_RELAY_URL || !env.CATALOGSYNC_RELAY_SECRET) {
     return json({ error: 'publisher_not_configured' }, 503);
   }

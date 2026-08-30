@@ -1,5 +1,6 @@
 export interface InternalCatalogEnv {
   INTERNAL_CATALOG_API_TOKEN?: string;
+  INQUIRY_CATALOG_API_TOKEN?: string;
   CATALOGSYNC_PIPELINE_API_TOKEN?: string;
   ORDERMGMT_CATALOG_API_TOKEN?: string;
   SUPABASE_URL?: string;
@@ -448,6 +449,28 @@ export function pipelineAuthorized(request: Request, env: InternalCatalogEnv): b
   return Boolean(
     (env.CATALOGSYNC_PIPELINE_API_TOKEN
       && tokensEqual(token, env.CATALOGSYNC_PIPELINE_API_TOKEN))
+    || (env.INTERNAL_CATALOG_API_TOKEN
+      && tokensEqual(token, env.INTERNAL_CATALOG_API_TOKEN)),
+  );
+}
+
+export function inquiryCatalogConfigurationReady(
+  env: InternalCatalogEnv,
+): env is InternalCatalogEnv & Required<Pick<InternalCatalogEnv, 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>> {
+  return Boolean(
+    env.SUPABASE_URL
+    && env.SUPABASE_SERVICE_ROLE_KEY
+    && (env.INQUIRY_CATALOG_API_TOKEN || env.INTERNAL_CATALOG_API_TOKEN),
+  );
+}
+
+/** Dedicated Inquiry owner access for operator-confirmed text and image flows. */
+export function inquiryCatalogAuthorized(request: Request, env: InternalCatalogEnv): boolean {
+  const token = bearerToken(request);
+  if (!token) return false;
+  return Boolean(
+    (env.INQUIRY_CATALOG_API_TOKEN
+      && tokensEqual(token, env.INQUIRY_CATALOG_API_TOKEN))
     || (env.INTERNAL_CATALOG_API_TOKEN
       && tokensEqual(token, env.INTERNAL_CATALOG_API_TOKEN)),
   );

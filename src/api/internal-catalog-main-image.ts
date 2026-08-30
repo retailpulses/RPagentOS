@@ -1,9 +1,9 @@
 import {
-  bearerToken,
   json,
   postgrestIn,
   supabaseRows,
-  tokensEqual,
+  inquiryCatalogAuthorized,
+  inquiryCatalogConfigurationReady,
   type InternalCatalogEnv,
 } from './internal-catalog.js';
 import {
@@ -57,19 +57,6 @@ interface LoadedMainImageContext {
   factPackHash: string;
   listing: Record<string, unknown>;
   selectedVariant: Record<string, unknown>;
-}
-
-function mainImageConfigured(env: InternalCatalogEnv): boolean {
-  return Boolean(
-    env.INTERNAL_CATALOG_API_TOKEN
-    && env.SUPABASE_URL
-    && env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-}
-
-function mainImageAuthorized(request: Request, env: InternalCatalogEnv): boolean {
-  const token = bearerToken(request);
-  return Boolean(token && env.INTERNAL_CATALOG_API_TOKEN && tokensEqual(token, env.INTERNAL_CATALOG_API_TOKEN));
 }
 
 function requireListingId(value: string): void {
@@ -480,8 +467,8 @@ async function fetchVerifiedSourceImage(asset: MainImageAsset, fetchFn: FetchLik
 
 function ensureHandlerBase(request: Request, env: InternalCatalogEnv, listingId: string, method: string): Response | null {
   if (request.method !== method) return json({ error: 'method_not_allowed' }, 405, { allow: method });
-  if (!mainImageConfigured(env)) return json({ error: 'service_not_configured' }, 503);
-  if (!mainImageAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
+  if (!inquiryCatalogConfigurationReady(env)) return json({ error: 'service_not_configured' }, 503);
+  if (!inquiryCatalogAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
   try { requireListingId(listingId); } catch (error) { return responseForError(error); }
   return null;
 }
