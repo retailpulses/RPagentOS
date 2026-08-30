@@ -1243,6 +1243,33 @@ export async function handleListingStateBatch(
     SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
   };
 
+  const accountByPlatformShop = new Map<string, string>();
+  try {
+    const groups = [...new Set(parsedUpdates.map((entry) => `${entry.platform}|${entry.shop_code}`))];
+    for (const group of groups) {
+      const [platform, shopCode] = group.split('|');
+      const accounts = await supabaseRows(
+        supabaseEnv,
+        'platform_accounts',
+        {
+          select: 'id,platform,shop_code,status',
+          platform: `eq.${platform}`,
+          shop_code: `eq.${shopCode}`,
+          status: 'eq.active',
+          limit: '2',
+        },
+        fetchFn,
+      );
+      if (accounts.length !== 1 || typeof (accounts[0] as Record<string, unknown>).id !== 'string') {
+        throw new Error(`expected exactly one active platform account for ${group}`);
+      }
+      accountByPlatformShop.set(group, (accounts[0] as Record<string, unknown>).id as string);
+    }
+  } catch (error) {
+    console.error('listing-state platform account lookup failed', error);
+    return json({ error: 'catalog_upstream_error' }, 502);
+  }
+
   let variantRows: unknown[];
   let listingRows: unknown[];
   let grainListingRows: unknown[];
@@ -1309,7 +1336,7 @@ export async function handleListingStateBatch(
           supabaseEnv,
           'platform_listings',
           {
-            select: 'id,variant_id,listing_status,raw_payload,external_listing_id,platform,shop_code',
+            select: 'id,variant_id,platform_account_id,listing_status,raw_payload,external_listing_id,platform,shop_code',
             platform: `eq.${platform}`,
             shop_code: `eq.${shopCode}`,
             external_listing_id: postgrestIn(batch),
@@ -1334,7 +1361,7 @@ export async function handleListingStateBatch(
           supabaseEnv,
           'platform_listings',
           {
-            select: 'id,variant_id,listing_status,raw_payload,external_listing_id,platform,shop_code',
+            select: 'id,variant_id,platform_account_id,listing_status,raw_payload,external_listing_id,platform,shop_code',
             platform: `eq.${platform}`,
             shop_code: `eq.${shopCode}`,
             variant_id: postgrestIn(batch),
@@ -1352,6 +1379,7 @@ export async function handleListingStateBatch(
   const listingByIdentity = new Map<string, {
     id: string;
     variant_id: string | null;
+    platform_account_id: string | null;
     listing_status: string | null;
     raw_payload: Record<string, unknown> | null;
   }>();
@@ -1367,6 +1395,7 @@ export async function handleListingStateBatch(
     listingByIdentity.set(identity, {
       id: row.id,
       variant_id: typeof row.variant_id === 'string' ? row.variant_id : null,
+      platform_account_id: typeof row.platform_account_id === 'string' ? row.platform_account_id : null,
       listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
       raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
         ? row.raw_payload as Record<string, unknown> : null,
@@ -1376,6 +1405,7 @@ export async function handleListingStateBatch(
   const listingByGrain = new Map<string, {
     id: string;
     variant_id: string | null;
+    platform_account_id: string | null;
     listing_status: string | null;
     raw_payload: Record<string, unknown> | null;
     external_listing_id: string | null;
@@ -1392,6 +1422,7 @@ export async function handleListingStateBatch(
     listingByGrain.set(grainKey, {
       id: row.id,
       variant_id: typeof row.variant_id === 'string' ? row.variant_id : null,
+      platform_account_id: typeof row.platform_account_id === 'string' ? row.platform_account_id : null,
       listing_status: typeof row.listing_status === 'string' ? row.listing_status : null,
       raw_payload: row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
         ? row.raw_payload as Record<string, unknown> : null,
@@ -1580,6 +1611,7 @@ export async function handleListingStateBatch(
       if (
         typeof storedState.idempotency_key === 'string'
         && storedState.idempotency_key === update.idempotency_key
+        && existingListing.platform_account_id === accountByPlatformShop.get(`${update.platform}|${update.shop_code}`)
       ) {
         results[update.index] = {
           platform: update.platform,
@@ -1677,6 +1709,7 @@ export async function handleListingStateBatch(
     const listingBody = toUpsert.map((entry) => ({
       platform: entry.platform,
       shop_code: entry.shop_code,
+      platform_account_id: accountByPlatformShop.get(`${entry.platform}|${entry.shop_code}`),
       external_listing_id: entry.external_listing_id,
       variant_id: entry.variantId,
       listing_status: entry.listingStatus,
