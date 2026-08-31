@@ -2,16 +2,20 @@
 
 This file is the repository-local entrypoint for Retailpulses database governance. It is installed and updated by `rp-governance-kit`.
 
-**Canonical policy:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_GOVERNANCE.md`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_GOVERNANCE.md)
+**Canonical policy:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_GOVERNANCE.md`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_GOVERNANCE.md)
 
-**Canonical workload registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_WORKLOADS.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_WORKLOADS.yaml)
+**Canonical ownership registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_OWNERSHIP.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_OWNERSHIP.yaml)
 
-**Canonical incident response:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_INCIDENT_RESPONSE.md`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_INCIDENT_RESPONSE.md)
+**Canonical access policy:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_ACCESS_POLICY.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_ACCESS_POLICY.yaml)
 
-**Canonical ownership registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_OWNERSHIP.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/main/docs/DATABASE_OWNERSHIP.yaml)
+**Canonical capabilities:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_CAPABILITIES.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_CAPABILITIES.yaml)
 
-**Installed governance ref:** `main`
-**Installed at:** `2026-07-15T15:51:34Z`
+**Canonical workload registry:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_WORKLOADS.yaml`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_WORKLOADS.yaml)
+
+**Canonical incident response:** [`retailpulses/rp-governance-kit` → `docs/DATABASE_INCIDENT_RESPONSE.md`](https://github.com/retailpulses/rp-governance-kit/blob/12056e83066536fff6804209f049f6de4b107081/docs/DATABASE_INCIDENT_RESPONSE.md)
+
+**Installed governance ref:** `12056e83066536fff6804209f049f6de4b107081`
+**Installed at:** `2026-08-31T09:49:27Z`
 
 ---
 
@@ -27,6 +31,26 @@ This file is the repository-local entrypoint for Retailpulses database governanc
 - A replacement for `docs/DATABASE_OWNERSHIP.yaml`.
 - A replacement for `docs/DATABASE_WORKLOADS.yaml`.
 - A substitute for the repository-specific declarations in `docs/16_DATABASE_GOVERNANCE.local.md`.
+
+## Minimal Local Declaration
+
+Each business repository should contain only a minimal local declaration. Do not copy the complete governance document into each repository. The pattern:
+
+```markdown
+## Database governance
+
+Canonical policy: `retailpulses/rp-governance-kit`
+
+This repository:
+- does not own migrations for the `<domain>` domain;
+- may use approved server-side read paths declared in the central registry;
+- must not expose privileged database credentials to frontend code;
+- must follow production activation controls for writing or high-risk workloads.
+
+Repository-specific details are documented locally.
+```
+
+Governance defines ownership, capabilities, privilege boundaries, and production risk controls. Business repositories choose implementation details within those approved boundaries. Central prose edits do not require downstream repository updates.
 
 ## Agent Instructions
 
@@ -84,12 +108,13 @@ Repositories that contain database-writing code (Workers, scripts, cron jobs, sy
 - **Kill-switch method:** how to abort safely
 - **Approval:** who authorized this workload in this repository
 - **Workload declaration reference:** link to the corresponding entry in `DATABASE_WORKLOADS.yaml` or the Issue that authorized a one-off workload
+- **Egress contract:** for scheduled/bulk reads, stable client identity, explicit projection, pagination/cursor strategy, measured per-run/day response-byte budgets, and thresholds
 
 Workloads that do not yet have a canonical registry entry in `DATABASE_WORKLOADS.yaml` must be declared as one-off in `docs/16_DATABASE_GOVERNANCE.local.md` with the same fields, and an Issue must be filed to register them in the canonical registry.
 
 Repositories that do not host any database-writing workloads should state:
 
-> **Workload declaration:** This repository has no database-writing workloads. All database access is read-only or mediated through an internal API that handles workload safety in its owning repository.
+> **Workload declaration:** This repository has no database-writing workloads. All database access is read-only. Production writing workloads are declared in the central workload registry.
 
 ## Quick Reference
 
@@ -104,8 +129,9 @@ Repositories that do not host any database-writing workloads should state:
 | Generated types | Required for direct Supabase clients; exemption available for API-only consumers |
 | Workload registry | Recurring workloads must be registered in `DATABASE_WORKLOADS.yaml` |
 | N+1 prohibition | No per-record DB/API lookups in loops; use bulk retrieval; declare max_requests_per_invocation and max_requests_per_1000_input_rows |
+| Egress control | Scheduled/bulk reads use stable client identity, explicit columns, cursor decision, response-byte budgets, and client-side byte metrics |
 | Change-aware writes | Periodic scans must not rewrite unchanged rows for per-row timestamps; prefer run-level freshness |
-| Access path | Every workload must declare `internal_api`, `supavisor`, `postgrest`, or `direct_postgres` |
+| Access path | Every workload must declare `postgrest`, `supavisor`, `internal_api`, or `direct_postgres`; consumers may use any approved server-side path |
 | Release mapping | Scheduled production workloads must map to a reviewed Git commit; no untracked VPS source |
 | Rollout gates | High-risk: zero-write dry-run → bounded canary → manual full run → ≥2 healthy scheduled cycles |
 | Run health independence | Current-run health not based on historical alerts; separate this-run metrics from known debt |
