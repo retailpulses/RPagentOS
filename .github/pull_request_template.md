@@ -152,6 +152,12 @@
 - **Disk I/O impact:** low | medium | high
 - **CPU impact:** low | medium | high
 - **Expected growth rate (monthly):** (rows/data volume)
+- **Stable client identity (`x-client-info` / User-Agent / application_name):**
+- **Read projection:** explicit columns | bounded wildcard (justify)
+- **Pagination / incremental cursor:**
+- **Measured response bytes per invocation:**
+- **Projected response bytes per day:**
+- **Egress warning / critical thresholds:**
 - [ ] Budget reviewed against current plan limits (see Supabase Dashboard)
 - [ ] Downgrade plan documented if compute tier change was required
 - [ ] Monitoring dashboard or alert configured

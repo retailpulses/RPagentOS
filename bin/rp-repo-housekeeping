@@ -191,7 +191,7 @@ cat > "$REPORT" <<-REPORT_BODY
 ## Readiness
 - Repo ready for next task: $READY
 - Follow-up actions:
-$(printf "$FOLLOWUP_ACTIONS" | sed 's/^/  /')
+$(printf '%b' "$FOLLOWUP_ACTIONS" | sed 's/^/  /')
 REPORT_BODY
 
 if [[ "$DRY_RUN" == true ]]; then
