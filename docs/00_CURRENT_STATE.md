@@ -1,5 +1,41 @@
 # Current State
 
+## Repository role — 2026-09-04 direction
+
+RPagentOS currently contains two materially different responsibilities. They must be treated as separate architectural roles even while they remain in one repository.
+
+### Role A — Shared Domain Owner: ACTIVE / STABLE
+
+RPagentOS is currently the physical migration and contract owner for shared domains, most importantly `product_catalog`.
+
+This role includes owner-side schema/migrations and the narrow views, roles, Auth mappings and owner APIs used by external consumers such as CatalogSync and ticket-handling.
+
+Near-term rule:
+
+- preserve existing production consumer contracts;
+- no Product Catalog repository migration yet;
+- no rename/drop/move of externally consumed objects as cleanup;
+- shared-domain schema changes require an explicit domain requirement and consumer-impact review;
+- no consumer gains ownership of shared schema merely because it executes a workload.
+
+See `docs/architecture/EXTERNAL_CONSUMER_CONTRACTS.md` and #104 for the dependency safety map.
+
+### Role B — Agent OS Application: FROZEN / MAINTENANCE
+
+The application/product layer is frozen from feature expansion while its long-term value and placement are reassessed.
+
+Near-term rule:
+
+- do not default new business capabilities into RPagentOS;
+- do not add new owned domains without an explicit architecture decision;
+- existing production features may receive maintenance, reliability and safety fixes;
+- existing non-core domains/features will later be classified `KEEP`, `MOVE LATER`, or `RETIRE`;
+- experimental capabilities whose permanent owner is unclear should use an appropriate business repository or `retailpulses/inbox` rather than expanding Agent OS by default.
+
+This is a scope freeze, not a shutdown. Existing production behavior and consumer contracts remain supported.
+
+Tracking: #103.
+
 ## Production
 
 | Item | Value |
@@ -25,4 +61,4 @@
 
 ## Next Milestone
 
-<!-- The next major goal for this project -->
+Stabilize the shared-domain ownership boundary and complete the external consumer/contract audit before considering any RPagentOS squeeze, domain extraction, repository merge, or retirement work. New Agent OS application feature expansion is not a milestone.
