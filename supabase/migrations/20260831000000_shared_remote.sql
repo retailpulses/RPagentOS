@@ -1,0 +1,8 @@
+-- Domain: order_management
+-- Owner: retailpulses/OrderMgmt
+-- Affected: shared hosted migration history only
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/RPagentOS
+-- History alignment for OrderMgmt migration 20260831000000_add_component_line_columns.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105

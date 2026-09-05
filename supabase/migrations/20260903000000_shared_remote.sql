@@ -1,0 +1,8 @@
+-- Domain: inquiry
+-- Owner: retailpulses/inquiry-automation
+-- Affected: shared hosted migration history only
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/RPagentOS
+-- History alignment for inquiry-automation migration 20260903000000_add_mercari_inquiry_api_first.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105

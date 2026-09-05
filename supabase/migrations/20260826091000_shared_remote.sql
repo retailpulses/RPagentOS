@@ -1,0 +1,8 @@
+-- Domain: order_management
+-- Owner: retailpulses/OrderMgmt
+-- Affected: shared hosted migration history only
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/RPagentOS
+-- History alignment for OrderMgmt migration 20260826091000_add_cancellation_reason.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105
