@@ -1,0 +1,7 @@
+-- Domain: inquiry
+-- Owner: retailpulses/inquiry-automation
+-- Affected: shared hosted migration history only
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/RPagentOS
+-- History alignment for inquiry-automation migration 20260904000000_link_api_inquiries_to_catalog.sql. No executable SQL.

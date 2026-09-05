@@ -1,0 +1,7 @@
+-- Domain: inquiry
+-- Owner: retailpulses/inquiry-automation
+-- Affected: shared hosted migration history only
+-- Change class: additive
+-- Hosted write required: no
+-- Consumers: retailpulses/RPagentOS
+-- History alignment for inquiry-automation migration 20260904000200_backfill_api_inquiry_product_links.sql. No executable SQL.
