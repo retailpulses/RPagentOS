@@ -234,22 +234,22 @@ before running `--apply`.
 - **Rollback:** preserve imported prices; corrections require a new reviewed migration targeting exact listing IDs
 - **Approval and evidence:** [RPagentOS issue #105](https://github.com/retailpulses/RPagentOS/issues/105)
 
-## Manual Workload: Shop4 Listing Price CSV Importer
+## Manual Workload: Mercari Shops Listing Price CSV Importer
 
-- **Workload ID:** `shop4_listing_price_csv_import`
+- **Workload ID:** `mercari_listing_price_csv_import`
 - **Category:** imports
 - **Risk level:** medium
-- **Trigger:** manual operator invocation after reviewing an official Shop4 CSV export
+- **Trigger:** manual operator invocation after reviewing official Shop1-Shop4 CSV exports
 - **Affected table/columns:** `platform_listings.current_price`, `platform_listings.mercari_before_discount_price`
 - **Access path:** owner-operated Supabase PostgREST using a server-side service credential
-- **Scope:** fixed filters `platform=mercari`, `shop_code=shop4`, exact CSV `商品ID`
+- **Scope:** fixed `platform=mercari`, explicit `shop_code=shop1|shop2|shop3|shop4`, exact CSV `商品ID`
 - **Bounds:** CSV listing count; apply requires an explicit `--max-changes`; sequential writes
 - **Canary/readback:** first five changed rows are read back before the remainder; final full CSV scope must match exactly
 - **Idempotency:** unchanged rows are skipped; the same CSV rerun produces zero changes
 - **Failure behavior:** duplicate/missing listing IDs, invalid prices, excess changes, or readback mismatch stop execution
 - **External effects:** none; no Mercari call, inventory write, SKU write, or status change
 - **Kill switch:** omit `--apply` or interrupt execution; completed writes remain safe and a retry converges idempotently
-- **Approval and evidence:** [RPagentOS issue #113](https://github.com/retailpulses/RPagentOS/issues/113)
+- **Approval and evidence:** [RPagentOS issue #113](https://github.com/retailpulses/RPagentOS/issues/113), [RPagentOS issue #115](https://github.com/retailpulses/RPagentOS/issues/115)
 
 ## Manual Account Metrics Portal Entry Workload
 
