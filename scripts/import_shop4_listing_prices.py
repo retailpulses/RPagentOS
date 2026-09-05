@@ -82,6 +82,8 @@ class PostgrestClient:
     def __init__(self, base_url: str, service_key: str) -> None:
         self.url = base_url.rstrip("/") + "/rest/v1/platform_listings"
         self.headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}"}
+        self.request_count = 0
+        self.response_bytes = 0
 
     def request(self, *, query: dict[str, str], method: str = "GET", body: dict | None = None) -> list[dict]:
         headers = dict(self.headers)
@@ -93,7 +95,10 @@ class PostgrestClient:
             self.url + "?" + urllib.parse.urlencode(query), headers=headers, data=data, method=method
         )
         with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
+            raw = response.read()
+        self.request_count += 1
+        self.response_bytes += len(raw)
+        return json.loads(raw)
 
     def read(self, ids: Iterable[str]) -> dict[str, dict]:
         ids = list(ids)
@@ -202,6 +207,8 @@ def main() -> int:
             raise ImportFailure(f"final readback failed for {len(failures)} listings: {failures[:10]}")
         report["verified"] = len(inputs)
 
+    report["postgrest_requests"] = client.request_count
+    report["response_bytes"] = client.response_bytes
     rendered = json.dumps(report, ensure_ascii=False, indent=2, default=str)
     print(rendered)
     if args.report:
