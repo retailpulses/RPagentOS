@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-09-05 — Key Shop4 price import by listing identity
+
+The Shop4 price import requires all 2,590 unique Mercari listing IDs to match.
+Eleven CSV SKUs differ from historical `platform_listing_skus` values under those
+same listings, so the migration audits the exact known mismatch set without using
+SKU as the price-write key. Any new listing or SKU drift still fails the transaction.
+
 ## 2026-09-05 — Align shared hosted migration history before Shop4 price import
 
 ### Context
