@@ -2626,6 +2626,14 @@ DECLARE
   listing_match_count integer;
   sku_match_count integer;
   sku_mismatch_ids text[];
+  expected_sku_mismatch_ids text[] := ARRAY[
+    '2JMepQSeAp2PkmXcCuzvwP', '2JMepQSeAugvPpuhZn2YJD',
+    '2JMf3iQ3TTzyxogZgeEqCV', '2JMfgo5ZE86SJnbh94twb5',
+    '2JMjVuE2XyDLR3dW7waD6i', '2JMjvbTQBBp8uKt5i7SRvc',
+    '2JMjvc6ETbW7QAfer2qAfE', '2JMjvc7BYURJUZq9FxufMM',
+    '2JMipQ2JXvPzNAYoyYxwtn', '2JMipQTByshUe5GvVgHuni',
+    '2JMk7XmkX7wRbLbg5Tv83m'
+  ]::text[];
 BEGIN
   SELECT count(*) INTO input_count FROM shop4_listing_price_input;
   IF input_count <> 2590 THEN
@@ -2666,14 +2674,10 @@ BEGIN
     SELECT 1 FROM public.platform_listing_skus s
     WHERE s.listing_id = l.id AND (s.seller_sku = i.seller_sku OR s.sku_code = i.seller_sku)
   );
-  IF sku_mismatch_ids <> ARRAY[
-    '2JMepQSeAp2PkmXcCuzvwP', '2JMepQSeAugvPpuhZn2YJD',
-    '2JMf3iQ3TTzyxogZgeEqCV', '2JMfgo5ZE86SJnbh94twb5',
-    '2JMjVuE2XyDLR3dW7waD6i', '2JMjvbTQBBp8uKt5i7SRvc',
-    '2JMjvc6ETbW7QAfer2qAfE', '2JMjvc7BYURJUZq9FxufMM',
-    '2JMipQ2JXvPzNAYoyYxwtn', '2JMipQTByshUe5GvVgHuni',
-    '2JMk7XmkX7wRbLbg5Tv83m'
-  ]::text[] THEN
+  IF NOT (
+    sku_mismatch_ids @> expected_sku_mismatch_ids
+    AND sku_mismatch_ids <@ expected_sku_mismatch_ids
+  ) THEN
     RAISE EXCEPTION 'Shop4 SKU mismatch set changed: %', sku_mismatch_ids;
   END IF;
 
