@@ -217,6 +217,22 @@ before running `--apply`.
 - **Rollback:** delete only rows matching the four exact source filenames and `mercari_seller_dashboard_monthly_csv`
 - **Approval and evidence:** [RPagentOS issue #70](https://github.com/retailpulses/RPagentOS/issues/70)
 
+## One-Off Workload: Shop4 Listing Price Import
+
+- **Workload ID:** `shop4_listing_price_import_20260905`
+- **Category:** imports
+- **Risk level:** medium
+- **Trigger:** manual migration, one time
+- **Affected table:** `platform_listings`
+- **Access path:** `direct_postgres` through the pinned Supabase CLI migration workflow
+- **Expected volume:** 2,592 existing Mercari Shop4 listings
+- **Concurrency / retries:** one transaction / zero retries
+- **Kill switch:** cancel before transaction commit; any validation error aborts all writes
+- **Idempotency:** update only rows whose two price values differ; exact final readback is asserted
+- **Scope:** `current_price` from CSV `現在価格`; `mercari_before_discount_price` from CSV `値引き前の価格`
+- **Rollback:** preserve imported prices; corrections require a new reviewed migration targeting exact listing IDs
+- **Approval and evidence:** [RPagentOS issue #105](https://github.com/retailpulses/RPagentOS/issues/105)
+
 ## Manual Account Metrics Portal Entry Workload
 
 - **Workload ID:** `account_metrics_manual_portal_entry`
