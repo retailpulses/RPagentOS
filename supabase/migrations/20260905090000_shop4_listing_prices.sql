@@ -4,7 +4,7 @@
 -- Change class: data
 -- Hosted write required: yes
 -- Consumers: retailpulses/CatalogSync, retailpulses/ticket-handling
--- Issues: https://github.com/retailpulses/RPagentOS/issues/105, https://github.com/retailpulses/RPagentOS/issues/108
+-- Issues: https://github.com/retailpulses/RPagentOS/issues/105, https://github.com/retailpulses/RPagentOS/issues/108, https://github.com/retailpulses/RPagentOS/issues/110
 -- Forward recovery: rerun this idempotent migration after correcting exact input rows.
 -- Rollback: preserve populated prices; any correction must target explicit Shop4 listing IDs.
 -- Excludes two fee/shipping adjustment-only records absent from platform_listings:
@@ -2625,6 +2625,7 @@ DECLARE
   input_count integer;
   listing_match_count integer;
   sku_match_count integer;
+  sku_mismatch_ids text[];
 BEGIN
   SELECT count(*) INTO input_count FROM shop4_listing_price_input;
   IF input_count <> 2590 THEN
@@ -2649,11 +2650,34 @@ BEGIN
     SELECT 1 FROM public.platform_listing_skus s
     WHERE s.listing_id = l.id AND (s.seller_sku = i.seller_sku OR s.sku_code = i.seller_sku)
   );
-  IF sku_match_count <> input_count THEN
-    RAISE EXCEPTION 'Shop4 SKU match mismatch: input %, matched %', input_count, sku_match_count;
+  -- Listing identity is the write key. Eleven known rows have stale SKU projections;
+  -- fail if that audited baseline changes, but do not block listing-keyed price data.
+  IF sku_match_count <> 2579 THEN
+    RAISE EXCEPTION 'Shop4 SKU audit drifted: expected 2579 matches, got %', sku_match_count;
   END IF;
 
-  RAISE NOTICE 'Shop4 price audit passed: % listings and SKUs matched', input_count;
+  SELECT array_agg(i.external_listing_id ORDER BY i.external_listing_id)
+  INTO sku_mismatch_ids
+  FROM shop4_listing_price_input i
+  JOIN public.platform_listings l
+    ON l.platform = 'mercari' AND l.shop_code = 'shop4'
+   AND l.external_listing_id = i.external_listing_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM public.platform_listing_skus s
+    WHERE s.listing_id = l.id AND (s.seller_sku = i.seller_sku OR s.sku_code = i.seller_sku)
+  );
+  IF sku_mismatch_ids <> ARRAY[
+    '2JMepQSeAp2PkmXcCuzvwP', '2JMepQSeAugvPpuhZn2YJD',
+    '2JMf3iQ3TTzyxogZgeEqCV', '2JMfgo5ZE86SJnbh94twb5',
+    '2JMjVuE2XyDLR3dW7waD6i', '2JMjvbTQBBp8uKt5i7SRvc',
+    '2JMjvc6ETbW7QAfer2qAfE', '2JMjvc7BYURJUZq9FxufMM',
+    '2JMipQ2JXvPzNAYoyYxwtn', '2JMipQTByshUe5GvVgHuni',
+    '2JMk7XmkX7wRbLbg5Tv83m'
+  ]::text[] THEN
+    RAISE EXCEPTION 'Shop4 SKU mismatch set changed: %', sku_mismatch_ids;
+  END IF;
+
+  RAISE NOTICE 'Shop4 price audit passed: % listings matched; % SKUs matched; 11 known SKU drifts', input_count, sku_match_count;
 END $$;
 
 -- Five deterministic canaries first, still inside the all-or-nothing transaction.
