@@ -5,3 +5,4 @@
 -- Hosted write required: no
 -- Consumers: retailpulses/RPagentOS
 -- History alignment for OrderMgmt migration 20260830021246_add_rakuten_status_audit.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105

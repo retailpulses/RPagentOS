@@ -5,3 +5,4 @@
 -- Hosted write required: no
 -- Consumers: retailpulses/RPagentOS
 -- History alignment for inquiry-automation migration 20260904000300_add_inquiry_backfill_checkpoint_queue.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105

@@ -1,5 +1,31 @@
 # Decision Log
 
+## 2026-09-05 — Align shared hosted migration history before Shop4 price import
+
+### Context
+
+The shared Supabase project contains ten migrations owned by OrderMgmt and
+inquiry-automation that were absent from RPagentOS. This prevented the official
+RPagentOS migration workflow from reaching the reviewed Shop4 price migration.
+
+### Decision
+
+Add comment-only local history markers for the ten already-hosted migration versions.
+Each marker preserves the original domain owner and records the cross-domain exception
+under RPagentOS#105. Do not use migration repair or duplicate executable SQL.
+
+### Impact
+
+- The markers execute no SQL and do not change hosted data or schema.
+- RPagentOS can compare its local migration history with the shared hosted ledger.
+- The Shop4 import remains a separate transactional migration with strict match and
+  readback assertions.
+
+### Follow-up
+
+- Run the official migration workflow in dry-run mode.
+- Apply the Shop4 migration only after the dry-run passes, then perform exact readback.
+
 ## 2026-07-18 — Adopt Baserow Mercari pricing formula as PostgreSQL trigger
 
 ### Context

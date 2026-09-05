@@ -5,3 +5,4 @@
 -- Hosted write required: no
 -- Consumers: retailpulses/RPagentOS
 -- History alignment for inquiry-automation migration 20260904000000_link_api_inquiries_to_catalog.sql. No executable SQL.
+-- Cross-domain exception: https://github.com/retailpulses/RPagentOS/issues/105
