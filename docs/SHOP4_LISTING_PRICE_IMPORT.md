@@ -44,6 +44,9 @@ The importer filters Mercari template rows whose processing flag starts with
 the first five writes before continuing, and performs a final exact readback of
 the complete CSV scope. Re-running the same CSV should report zero changes.
 
+The 2026-09-05 production dry-run read 2,255 listings in 23 bounded requests and
+received 363,191 response bytes. Investigate runs above 5 MB and stop at 10 MB.
+
 ## Version history
 
 - 2026-09-05: Initial reusable dry-run/apply workflow under RPagentOS#113.
