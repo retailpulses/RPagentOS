@@ -225,7 +225,7 @@ before running `--apply`.
 - **Trigger:** manual migration, one time
 - **Affected table:** `platform_listings`
 - **Access path:** `direct_postgres` through the pinned Supabase CLI migration workflow
-- **Expected volume:** 2,592 existing Mercari Shop4 listings
+- **Expected volume:** 2,590 existing Mercari Shop4 product listings; excludes two fee/shipping adjustment-only records not modeled in `platform_listings`
 - **Concurrency / retries:** one transaction / zero retries
 - **Kill switch:** cancel before transaction commit; any validation error aborts all writes
 - **Idempotency:** update only rows whose two price values differ; exact final readback is asserted
