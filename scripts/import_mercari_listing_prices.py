@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import Mercari Shop4 listing prices from an official CSV export.
+"""Import Mercari Shops listing prices from official CSV exports.
 
 Dry-run is the default. This owner-side utility writes only
 platform_listings.current_price and mercari_before_discount_price.
@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Iterable
 
 
-SHOP_FILTERS = {"platform": "eq.mercari", "shop_code": "eq.shop4"}
 REQUIRED_COLUMNS = {"処理フラグ", "商品ID", "現在価格", "値引き前の価格"}
 
 
@@ -46,14 +45,23 @@ def parse_positive_price(raw: str, *, field: str, line: int) -> Decimal:
     return value
 
 
-def load_csv(path: Path) -> list[PriceInput]:
+def load_csv(paths: list[Path]) -> list[PriceInput]:
+    result: list[PriceInput] = []
+    seen: set[str] = set()
+    for path in paths:
+        result.extend(_load_one_csv(path, seen))
+    if not result:
+        raise ImportFailure("CSV contains no importable rows")
+    return result
+
+
+def _load_one_csv(path: Path, seen: set[str]) -> list[PriceInput]:
     with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         missing = REQUIRED_COLUMNS - set(reader.fieldnames or ())
         if missing:
             raise ImportFailure(f"missing CSV columns: {sorted(missing)}")
         result: list[PriceInput] = []
-        seen: set[str] = set()
         for line, row in enumerate(reader, start=2):
             if (row.get("処理フラグ") or "").strip().startswith("#"):
                 continue
@@ -61,7 +69,7 @@ def load_csv(path: Path) -> list[PriceInput]:
             if not listing_id:
                 raise ImportFailure(f"line {line}: 商品ID is empty")
             if listing_id in seen:
-                raise ImportFailure(f"line {line}: duplicate 商品ID {listing_id}")
+                raise ImportFailure(f"{path.name} line {line}: duplicate 商品ID {listing_id}")
             seen.add(listing_id)
             result.append(
                 PriceInput(
@@ -73,15 +81,14 @@ def load_csv(path: Path) -> list[PriceInput]:
                     ),
                 )
             )
-    if not result:
-        raise ImportFailure("CSV contains no importable rows")
     return result
 
 
 class PostgrestClient:
-    def __init__(self, base_url: str, service_key: str) -> None:
+    def __init__(self, base_url: str, service_key: str, shop_code: str) -> None:
         self.url = base_url.rstrip("/") + "/rest/v1/platform_listings"
         self.headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}"}
+        self.shop_filters = {"platform": "eq.mercari", "shop_code": f"eq.{shop_code}"}
         self.request_count = 0
         self.response_bytes = 0
 
@@ -108,7 +115,7 @@ class PostgrestClient:
             rows = self.request(
                 query={
                     "select": "id,external_listing_id,current_price,mercari_before_discount_price",
-                    **SHOP_FILTERS,
+                    **self.shop_filters,
                     "external_listing_id": "in.(" + ",".join(batch) + ")",
                 }
             )
@@ -122,7 +129,7 @@ class PostgrestClient:
     def update(self, item: PriceInput) -> dict:
         rows = self.request(
             method="PATCH",
-            query={**SHOP_FILTERS, "external_listing_id": f"eq.{item.external_listing_id}"},
+            query={**self.shop_filters, "external_listing_id": f"eq.{item.external_listing_id}"},
             body={
                 "current_price": str(item.current_price),
                 "mercari_before_discount_price": str(item.mercari_before_discount_price),
@@ -150,11 +157,13 @@ def verify(inputs: list[PriceInput], rows: dict[str, dict]) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Dry-run or import Shop4 prices from Mercari CSV")
-    parser.add_argument("--csv", required=True, type=Path)
+    parser = argparse.ArgumentParser(description="Dry-run or import Mercari Shops prices from CSV")
+    parser.add_argument("--shop-code", required=True, choices=("shop1", "shop2", "shop3", "shop4"))
+    parser.add_argument("--csv", required=True, action="append", type=Path, help="Repeat for multiple same-shop CSV files")
     parser.add_argument("--apply", action="store_true", help="Perform Supabase writes")
     parser.add_argument("--max-changes", type=int, help="Required with --apply; exact upper safety bound")
     parser.add_argument("--canary-count", type=int, default=5)
+    parser.add_argument("--exclude-listing-id", action="append", default=[], help="Explicit non-product CSV ID to exclude")
     parser.add_argument("--report", type=Path)
     return parser.parse_args()
 
@@ -171,8 +180,16 @@ def main() -> int:
         raise ImportFailure("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
 
     inputs = load_csv(args.csv)
+    requested_exclusions = set(args.exclude_listing_id)
+    unknown_exclusions = requested_exclusions - {item.external_listing_id for item in inputs}
+    if unknown_exclusions:
+        raise ImportFailure(f"excluded listing IDs are not present in CSV input: {sorted(unknown_exclusions)}")
+    excluded = [item for item in inputs if item.external_listing_id in requested_exclusions]
+    inputs = [item for item in inputs if item.external_listing_id not in requested_exclusions]
+    if not inputs:
+        raise ImportFailure("all CSV rows were excluded")
     by_id = {item.external_listing_id: item for item in inputs}
-    client = PostgrestClient(base_url, service_key)
+    client = PostgrestClient(base_url, service_key, args.shop_code)
     before = client.read(by_id)
     missing = sorted(set(by_id) - set(before))
     if missing:
@@ -183,6 +200,9 @@ def main() -> int:
 
     report = {
         "mode": "apply" if args.apply else "dry_run",
+        "shop_code": args.shop_code,
+        "csv_files": [path.name for path in args.csv],
+        "excluded": [asdict(item) for item in excluded],
         "csv_rows": len(inputs),
         "matched_listings": len(before),
         "changes": len(changes),
