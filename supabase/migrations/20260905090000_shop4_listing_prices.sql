@@ -4,9 +4,11 @@
 -- Change class: data
 -- Hosted write required: yes
 -- Consumers: retailpulses/CatalogSync, retailpulses/ticket-handling
--- Issue: https://github.com/retailpulses/RPagentOS/issues/105
+-- Issues: https://github.com/retailpulses/RPagentOS/issues/105, https://github.com/retailpulses/RPagentOS/issues/108
 -- Forward recovery: rerun this idempotent migration after correcting exact input rows.
 -- Rollback: preserve populated prices; any correction must target explicit Shop4 listing IDs.
+-- Excludes two fee/shipping adjustment-only records absent from platform_listings:
+-- 2JUSPhPbREyHNLqyJPBfM8 (RP004-R), 2JTfXGaA7DjPggYVHRsMLu (N00000003).
 
 BEGIN;
 
@@ -2223,7 +2225,6 @@ VALUES
   ('2JV68tDX7P7TpGLAPGnBfk', 'N509P249251B', 18700, 18700),
   ('2JUwtaxsS6u28yWToRMvo9', 'N508P515636B', 10900, 10900),
   ('2JUwtZcc4mXFzoh4bhGDwK', 'N509P513705A', 17300, 17300),
-  ('2JUSPhPbREyHNLqyJPBfM8', 'RP004-R', 900, 900),
   ('2JUBgxYZdrAZt3Dk88thvG', 'N511P475677N', 18100, 18100),
   ('2JUBgxYHBwn3Q9uRPwwCnc', 'N511P475712W', 17150, 17150),
   ('2JUBgxBTHmV3gsFP7iHPHJ', 'N510P479808P', 6850, 6850),
@@ -2253,7 +2254,6 @@ VALUES
   ('2JUBgw2pbAZpFunEdf69nS', 'MAT422836C469767O', 28550, 28550),
   ('2JUBgvctnofgaSZNmGbieA', '3N512P455096A', 17750, 17750),
   ('2JUBgvW7befgGV8B8GBRMX', '3512P317060D', 17750, 17750),
-  ('2JTfXGaA7DjPggYVHRsMLu', 'N00000003', 4000, 4000),
   ('2JTQ3Z8aFzBHarpwDecoab', 'N506P315203B-2PCS', 23580, 23580),
   ('2JTGvuqPLy5DifGuyBd2Dw', 'N508P229074A-RRR', 38800, 38800),
   ('2JTDXXSvDKWTiZzNpeZXYV', 'N508P480989A', 18450, 18450),
@@ -2627,8 +2627,8 @@ DECLARE
   sku_match_count integer;
 BEGIN
   SELECT count(*) INTO input_count FROM shop4_listing_price_input;
-  IF input_count <> 2592 THEN
-    RAISE EXCEPTION 'expected 2592 input rows, got %', input_count;
+  IF input_count <> 2590 THEN
+    RAISE EXCEPTION 'expected 2590 input rows, got %', input_count;
   END IF;
 
   SELECT count(*) INTO listing_match_count
@@ -2700,7 +2700,7 @@ BEGIN
     AND l.external_listing_id=i.external_listing_id
   WHERE (l.current_price, l.mercari_before_discount_price)
         IS NOT DISTINCT FROM (i.current_price, i.mercari_before_discount_price);
-  IF verified <> 2592 THEN RAISE EXCEPTION 'final readback mismatch: %', verified; END IF;
+  IF verified <> 2590 THEN RAISE EXCEPTION 'final readback mismatch: %', verified; END IF;
   RAISE NOTICE 'Shop4 price import verified: % rows', verified;
 END $$;
 
