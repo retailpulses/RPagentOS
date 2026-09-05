@@ -230,6 +230,7 @@ before running `--apply`.
 - **Kill switch:** cancel before transaction commit; any validation error aborts all writes
 - **Idempotency:** update only rows whose two price values differ; exact final readback is asserted
 - **Scope:** `current_price` from CSV `現在価格`; `mercari_before_discount_price` from CSV `値引き前の価格`
+- **Identity audit:** all 2,590 listing IDs must match; 2,579 current SKU matches plus 11 known historical SKU drifts are asserted separately because prices are listing-keyed
 - **Rollback:** preserve imported prices; corrections require a new reviewed migration targeting exact listing IDs
 - **Approval and evidence:** [RPagentOS issue #105](https://github.com/retailpulses/RPagentOS/issues/105)
 
