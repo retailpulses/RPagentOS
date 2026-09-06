@@ -30,7 +30,8 @@ shop4 MVP's direct, read-only PostgREST access:
 - role `catalogsync_shop4_reader` — NOLOGIN, NOBYPASSRLS, 20-second statement
   timeout, granted to PostgREST `authenticator`
 - view `catalogsync_mercari_shop4_listing_map_v1` — filters listing mappings to
-  the active Mercari `shop4` account
+  the active Mercari `shop4` account and exposes owner-managed `current_price`
+  and `mercari_before_discount_price` for read-only coverage reporting
 - view `catalogsync_mercari_shop4_catalog_v1` — exposes only the catalog columns
   required for inventory, presale, shipping, and future pricing review
 
@@ -83,7 +84,9 @@ Mercari shops 1-3 direct read-only PostgREST access:
 - role `catalogsync_shop3_reader` — same configuration
 - view `catalogsync_mercari_listing_map_v1` — shared security-barrier
   listing-map view that uses `current_user` (set by PostgREST from the JWT
-  `role` claim) to isolate each shop's rows. NOT RLS; a view-level role gate.
+  `role` claim) to isolate each shop's rows and exposes owner-managed
+  `current_price` and `mercari_before_discount_price`. NOT RLS; a view-level
+  role gate.
 - view `catalogsync_mercari_catalog_v1` — column-limited canonical
   catalog projection shared by all three roles
 
@@ -314,6 +317,7 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 
 | Date | Change | Author | Migration |
 |------|--------|--------|-----------|
+| 2026-09-06 | Added two owner-managed listing-price columns to the existing shop-isolated CatalogSync Mercari read projections for weekly coverage reporting; no base data or privileges changed. | RPagentOS | `20260906060000_expose_mercari_listing_prices_to_catalogsync.sql` |
 | 2026-07-20 | Added the latest completed catalog run ID, status, total SKU count, and finish time to the SELECT-only marketplace projection. This is the authoritative freshness signal because unchanged SKUs intentionally retain older per-row timestamps. | RPagentOS | `20260720020000_catalogsync_projection_run_freshness.sql` |
 | 2026-07-20 | Added the dedicated CatalogSync Rakuten VPS Auth identity and mapped it to the existing SELECT-only marketplace projection reader role. | RPagentOS | `20260720010000_catalogsync_rakuten_vps_auth_identity.sql` |
 | 2026-07-17 | Extended custom access-token hook to map shops 1-3 identity UUIDs: `f2214383-6188-42ea-8d42-7dd31b97dc69` → `catalogsync_shop1_reader`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` → `catalogsync_shop2_reader`, `1fdd359b-239b-4531-a38b-bb779e56d116` → `catalogsync_shop3_reader`. Resolves CatalogSync issue #34 owner-side follow-up. *Corrected by `20260717120000` — these UUIDs were local-only and never valid in hosted.* | RPagentOS | `20260717110000_catalogsync_shop1_3_auth_identity.sql` |
