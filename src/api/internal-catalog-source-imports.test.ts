@@ -74,11 +74,13 @@ function mockFetch(opts: {
   rowUpsertFails?: boolean;
   commercialUpsertFails?: boolean;
   patchFails?: boolean;
+  requestUrls?: string[];
 } = {}): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
   const createdVariants: MockVariant[] = [];
 
   return async (input, init) => {
     const url = String(input);
+    opts.requestUrls?.push(url);
     const method = init?.method ?? 'GET';
 
     if (method === 'PATCH' && url.includes('/source_import_runs')) {
@@ -236,6 +238,34 @@ test('rejects invalid source_system', async () => {
     async () => Response.json([]),
   );
   assert.equal(response.status, 400);
+});
+
+test('accepts catalog backfill with null source_added_at and isolated run identity', async () => {
+  const requestUrls: string[] = [];
+  const response = await handleSourceImportBatch(
+    request({
+      run: validRun({ source_system: 'gigab2b_catalog_backfill' }),
+      rows: [validRow({ source_added_at: null })],
+    }),
+    env,
+    mockFetch({ requestUrls }),
+  );
+  assert.equal(response.status, 200);
+  assert.ok(requestUrls.some((url) => url.includes('source_system=eq.gigab2b_catalog_backfill')));
+});
+
+test('rejects invented source_added_at for catalog backfill', async () => {
+  const response = await handleSourceImportBatch(
+    request({
+      run: validRun({ source_system: 'gigab2b_catalog_backfill' }),
+      rows: [validRow()],
+    }),
+    env,
+    async () => Response.json([]),
+  );
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, 'invalid_source_added_at');
 });
 
 test('rejects invalid window_start', async () => {

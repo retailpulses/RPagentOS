@@ -106,7 +106,7 @@ export interface SourceImportRunRequest {
 export interface SourceImportRowRequest {
   row_index: number;
   item_code: string;
-  source_added_at: string;
+  source_added_at: string | null;
   source_updated_at: string | null;
   row_hash: string;
   variant: {
@@ -1824,6 +1824,8 @@ const IMPORT_RAW_MAX_BYTES = 128 * 1024;
 
 const SOURCE_IMPORT_RUN_KEYS = new Set(['source_system', 'window_start', 'window_end', 'run_key', 'is_bootstrap']);
 
+const SOURCE_IMPORT_SYSTEMS = new Set(['gigab2b_saved', 'gigab2b_catalog_backfill']);
+
 const SOURCE_IMPORT_ROW_KEYS = new Set([
   'row_index', 'item_code', 'source_added_at', 'source_updated_at',
   'row_hash', 'variant', 'commercial',
@@ -1883,9 +1885,13 @@ export async function handleSourceImportBatch(
     return json({ error: 'invalid_run', message: `unknown run keys: ${runExtraKeys.join(', ')}` }, 400);
   }
 
-  if (runObj.source_system !== 'gigab2b_saved') {
-    return json({ error: 'invalid_source_system', message: 'source_system must be gigab2b_saved' }, 400);
+  if (typeof runObj.source_system !== 'string' || !SOURCE_IMPORT_SYSTEMS.has(runObj.source_system)) {
+    return json({
+      error: 'invalid_source_system',
+      message: 'source_system must be gigab2b_saved or gigab2b_catalog_backfill',
+    }, 400);
   }
+  const sourceSystem = runObj.source_system;
 
   if (typeof runObj.window_start !== 'string' || !validateIsoTimestamp(runObj.window_start)) {
     return json({ error: 'invalid_window_start', message: 'window_start must be a valid ISO timestamp' }, 400);
@@ -1920,7 +1926,7 @@ export async function handleSourceImportBatch(
     index: number;
     itemCode: string;
     identity: string;
-    sourceAddedAt: string;
+    sourceAddedAt: string | null;
     sourceUpdatedAt: string | null;
     rowHash: string;
     variantName: string;
@@ -1978,14 +1984,20 @@ export async function handleSourceImportBatch(
     }
     seenIdentities.add(identity);
 
-    if (typeof rowObj.source_added_at !== 'string' || !validateIsoTimestamp(rowObj.source_added_at)) {
-      return json({ error: 'invalid_source_added_at', message: 'source_added_at must be a valid ISO timestamp' }, 400);
+    if (sourceSystem === 'gigab2b_saved') {
+      if (typeof rowObj.source_added_at !== 'string' || !validateIsoTimestamp(rowObj.source_added_at)) {
+        return json({ error: 'invalid_source_added_at', message: 'source_added_at must be a valid ISO timestamp for gigab2b_saved' }, 400);
+      }
+    } else if (rowObj.source_added_at !== null) {
+      return json({ error: 'invalid_source_added_at', message: 'source_added_at must be null for gigab2b_catalog_backfill' }, 400);
     }
-    const sourceAddedAt = new Date(rowObj.source_added_at);
-    if (sourceAddedAt.getTime() > windowEnd.getTime()) {
+    const sourceAddedAt = typeof rowObj.source_added_at === 'string'
+      ? new Date(rowObj.source_added_at)
+      : null;
+    if (sourceAddedAt && sourceAddedAt.getTime() > windowEnd.getTime()) {
       return json({ error: 'leaking_timestamp', message: `source_added_at for row ${rowIndex} exceeds window_end` }, 400);
     }
-    if (sourceAddedAt.getTime() > futureLimit.getTime()) {
+    if (sourceAddedAt && sourceAddedAt.getTime() > futureLimit.getTime()) {
       return json({ error: 'future_timestamp', message: `source_added_at for row ${rowIndex} is in the future` }, 400);
     }
 
@@ -2073,7 +2085,7 @@ export async function handleSourceImportBatch(
         index: rowIndex,
         itemCode,
         identity,
-        sourceAddedAt: rowObj.source_added_at,
+        sourceAddedAt: rowObj.source_added_at as string | null,
         sourceUpdatedAt,
         rowHash: rowObj.row_hash,
         variantName: variantObj.variant_name.trim(),
@@ -2156,7 +2168,7 @@ export async function handleSourceImportBatch(
         status: 'active',
         raw_payload: {
           ...existingPayload,
-          gigab2b_saved: parsed.variantRawPayload,
+          [sourceSystem]: parsed.variantRawPayload,
           catalogsync_source_import: {
             row_hash: parsed.rowHash,
             source_added_at: parsed.sourceAddedAt,
@@ -2241,7 +2253,7 @@ export async function handleSourceImportBatch(
       'source_import_runs',
       {
         select: 'id,status,row_count',
-        source_system: 'eq.gigab2b_saved',
+        source_system: `eq.${sourceSystem}`,
         file_hash: `eq.${runKey}`,
         limit: '2',
       },
@@ -2255,9 +2267,10 @@ export async function handleSourceImportBatch(
     if (existingRun && typeof existingRun.id === 'string') {
       runId = existingRun.id;
     } else {
-      const sourceFile = `saved:${runObj.window_start}/${runObj.window_end}`;
+      const sourcePrefix = sourceSystem === 'gigab2b_saved' ? 'saved' : 'catalog-backfill';
+      const sourceFile = `${sourcePrefix}:${runObj.window_start}/${runObj.window_end}`;
       const newRunBody = [{
-        source_system: 'gigab2b_saved',
+        source_system: sourceSystem,
         source_file: sourceFile,
         file_hash: runKey,
         status: 'running',
@@ -2421,7 +2434,7 @@ export async function handleSourceImportBatch(
         last_sync_success_at: runObj.window_end,
         raw_payload: {
           ...(existingCommercialPayloads.get(mapping.variantId) ?? {}),
-          gigab2b_saved: parsed.commercialRawPayload,
+          [sourceSystem]: parsed.commercialRawPayload,
           catalogsync_source_import: {
             row_hash: parsed.rowHash,
             source_added_at: parsed.sourceAddedAt,
