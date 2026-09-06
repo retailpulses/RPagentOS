@@ -284,7 +284,10 @@ Request:
 ### Constraints
 
 - 1-100 rows, `run` and `rows` are required; unknown top-level keys are rejected.
-- `source_system` must be `gigab2b_saved`.
+- `source_system` must be `gigab2b_saved` or `gigab2b_catalog_backfill`.
+- `gigab2b_saved` requires a real Giga saved timestamp in `source_added_at`.
+  `gigab2b_catalog_backfill` requires `source_added_at=null`; callers must not
+  synthesize an `addedTime` for products discovered from a current catalog file.
 - `window_start` and `window_end` must be valid ISO-8601 timestamps, and
   `window_start` must be before `window_end`.
 - `run_key` and each `row_hash` must be 64-character SHA-256 hex digests;
@@ -312,14 +315,15 @@ After creation, all variants are re-read; if canonical identities remain missing
 or ambiguous the entire request fails with 502.
 
 A `source_import_runs` row is resolved using a bounded read-before-write by
-`source_system + file_hash(run_key)`. The `source_file` is set to
-`saved:<window_start>/<window_end>`. Window and bootstrap metadata are stored.
+`source_system + file_hash(run_key)`. The `source_file` is set to either
+`saved:<window_start>/<window_end>` or
+`catalog-backfill:<window_start>/<window_end>`. Window and bootstrap metadata are stored.
 Upon replay with an identical run key, the existing run is returned.
 
 Product commercials are upserted on `variant_id`
 with whitelisted fields plus `sync_status=synced` and
 `last_sync_success_at=window_end`. The Giga raw payload is namespaced under
-`gigab2b_saved` while preserving unrelated payload. Only after commercial state
+the validated source-system key while preserving unrelated payload. Only after commercial state
 is durable are `source_import_rows` upserted on `(run_id, row_index)` with
 `normalized_status=succeeded`.
 
