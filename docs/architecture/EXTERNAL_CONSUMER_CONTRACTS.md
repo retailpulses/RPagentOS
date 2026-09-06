@@ -51,6 +51,11 @@ The following are production-sensitive and must be treated as compatibility cont
 - `catalogsync_shop4_reader`
 - associated Supabase Auth workload identity → reader-role mappings
 
+The two listing-map views expose `current_price` and
+`mercari_before_discount_price` as owner-managed observations for CatalogSync's
+read-only Mercari discount-coverage report. These fields are additive to the
+existing mapping contract and do not replace canonical target pricing.
+
 CatalogSync code and job inventory directly reference these views. Removing or renaming them can stop Mercari reconciliation.
 
 ### Amazon / Rakuten marketplace projection
