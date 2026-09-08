@@ -323,3 +323,15 @@ Hosted writes require explicit approval. See `docs/DATABASE_GOVERNANCE.md` in rp
 | 2026-07-17 | Extended custom access-token hook to map shops 1-3 identity UUIDs: `f2214383-6188-42ea-8d42-7dd31b97dc69` → `catalogsync_shop1_reader`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1` → `catalogsync_shop2_reader`, `1fdd359b-239b-4531-a38b-bb779e56d116` → `catalogsync_shop3_reader`. Resolves CatalogSync issue #34 owner-side follow-up. *Corrected by `20260717120000` — these UUIDs were local-only and never valid in hosted.* | RPagentOS | `20260717110000_catalogsync_shop1_3_auth_identity.sql` |
 | 2026-07-17 | Forward correction: replaced local-only shops 1-3 Auth UUIDs with actual hosted identities. Preserved shop4 and marketplace mappings. Removed invalid `f2214383-6188-42ea-8d42-7dd31b97dc69`, `9f7ebd67-8b0f-4938-b395-b3f97b8fe7a1`, `1fdd359b-239b-4531-a38b-bb779e56d116`. Applied `865a076c-cd9f-4fba-9fd2-4ff0a155f2c7` → `catalogsync_shop1_reader`, `a531e2ee-be44-4c7f-87da-7c1d0f75494f` → `catalogsync_shop2_reader`, `31a4c8c5-f8dc-40a8-813c-e7939a4e16d3` → `catalogsync_shop3_reader`. | RPagentOS | `20260717120000_fix_local_auth_identities.sql` |
 | 2026-07-17 | Added `scripts/backfill_mercari_listings_from_api.py` and `tests/test_backfill_mercari_listings_from_api.py`. Owner-side backfill for CatalogSync issue #34. Python stdlib, dry-run default, Mercari GraphQL pagination, PostgREST upsert into `platform_listings` + `platform_listing_skus`. Rollback/audit docs added to this section above. | RPagentOS | N/A (operational script) |
+
+
+## Ops product manual fields (Issue #121)
+
+- Workload: `ops_product_manual_fields`, operator/event driven, medium risk.
+- Owner: RPagentOS/product_catalog; consumer: ops-portal through internal_api.
+- Scope: exact SKU read, and only manual_cost_price, manual_presale_arrival_date, presale_info_protect_until; at most 2 reads + 1 single-row PATCH per call. No batch/retry/schedule/schema change.
+- Credential: OPS_CATALOG_API_TOKEN only on owner and Ops server; requires trusted gateway actor/request ID. Other owner endpoints do not accept this token.
+- Kill switch: remove Ops token or disable Ops gateway writes; OrderMgmt remains independent.
+- Approval: user requested implementation/deployment on 2026-09-08; Ops #81 and RPagentOS #121.
+- Activation: read-only lookup and bounded verification, canonical URL acceptance. Production verification recorded separately.
+- Derived costs: existing pricing trigger, owner readback; marketplace synchronization separate.

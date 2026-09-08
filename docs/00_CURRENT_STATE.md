@@ -1,5 +1,7 @@
 # Current State
 
+2026-09-08: Product update tool implementation prepared (Ops #81 / RPagentOS #121); deployment/readback pending. Ops calls the product owner directly using existing Access identity; no OrderMgmt dependency. See `docs/plans/product-update-tool.md`.
+
 ## Repository role — 2026-09-04 direction
 
 RPagentOS currently contains two materially different responsibilities. They must be treated as separate architectural roles even while they remain in one repository.
