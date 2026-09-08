@@ -1,6 +1,6 @@
 # Current State
 
-2026-09-08: Product update tool implementation prepared (Ops #81 / RPagentOS #121); deployment/readback pending. Ops calls the product owner directly using existing Access identity; no OrderMgmt dependency. See `docs/plans/product-update-tool.md`.
+2026-09-08: Product update tool deployed via GitHub Actions (Ops source e938832 / RPagentOS source df7a0a3). Owner GET and one same-value PATCH/readback passed; business values unchanged. Gateway exact-SHA health and unauthorized API 401 verified; Ops writes enabled. Existing Access browser login acceptance remains pending. Ops calls RPagentOS directly, without OrderMgmt. See `docs/plans/product-update-tool.md`.
 
 ## Repository role — 2026-09-04 direction
 

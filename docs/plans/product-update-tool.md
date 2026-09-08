@@ -1,6 +1,6 @@
 # Product update tool — Canonical Plan v3
 
-状态：用户已授权实施与部署；v3 为当前 canonical plan，取代 v2，采纳 codex-b 两项 P2。实施与生产验收进行中。日期：2026-09-08（JST）。
+状态：用户已授权实施与部署；v3 为当前 canonical plan，取代 v2，采纳 codex-b 两项 P2。已部署；owner 原值写回与回读通过，Access 已登录页面验收待完成。日期：2026-09-08（JST）。
 
 用户确认：去掉 OrderMgmt 中转；后续继续增加产品主数据业务值工具。认证要求按上下文解释为复用现有 Cloudflare Access，operator 无需额外登录、账户或 token。
 
@@ -147,3 +147,14 @@ v2 为基于已核对合同的设计修订；新增 Ops adapter、Access JWT 验
 | v1 | 2026-09-08 | 首版评审计划；限定三个字段、独立精确查询、复用 owner 写入链路，记录并发与审计限制 |
 | v2 | 2026-09-08 | 取代 v1：Ops 直接调用产品 owner；支持后续产品业务值工具扩展；仅复用现有 Access 登录；新增独立服务 caller 与身份审计要求 |
 | v3 | 2026-09-08 | 采纳 codex-b 评审：成本按 trigger/owner 回读；分层认证错误映射；用户授权实施部署 |
+
+
+## 2026-09-08 发布证据
+
+- Ops 实现 PR retailpulses/ops-portal#82：e938832bfe17b74b900a8f31cd7ca346e47702d0；Pages run 34182187305、gateway run 34182200835 均成功。
+- Owner PR retailpulses/RPagentOS#122：df7a0a39a6fa246b55beddf4fab6c75c6e450dbb；Pages run 34182183427 成功。
+- 中央声明 PR retailpulses/rp-governance-kit#75 已合并。
+- Hosted pricing trigger 已通过 rp_agent_readonly、read-only transaction 核验。
+- N511P407695W 的空手动到货日期原值写回：PATCH 200、GET 200、三个手动字段及成本无变化；request ID product-tool-canary-20260908。
+- Gateway 精确版本 health 通过、直接未认证产品 API 401、正式域名未登录 302 到现有 Access。
+- 浏览器本地 fixture 查询、保存、清除通过；正式浏览器仍等待用户完成现有 Access 登录，不声称完整 operator 验收完成。
