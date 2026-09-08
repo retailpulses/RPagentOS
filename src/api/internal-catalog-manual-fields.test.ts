@@ -301,3 +301,30 @@ test('responds with Cache-Control: no-store', async () => {
   );
   assert.equal(res.headers.get('cache-control'), 'no-store');
 });
+
+test('Ops dedicated caller writes without OrderMgmt token and records trusted context', async () => {
+  const req = request({ manual_cost_price: 2000 }, 'ops-token');
+  req.headers.set('x-ops-actor-sub', 'operator-uuid');
+  req.headers.set('x-ops-request-id', 'request-uuid');
+  const opsEnv = { ...env, ORDERMGMT_CATALOG_API_TOKEN: undefined, OPS_CATALOG_API_TOKEN: 'ops-token' };
+  const capture: { body?: unknown } = {};
+  const records: string[] = [];
+  const original = console.info;
+  console.info = (value: string) => { records.push(value); };
+  try {
+    const res = await handleCatalogSkuManualFieldsUpdate(req, opsEnv, 'N511P407695W', successFetch(capture));
+    assert.equal(res.status, 200);
+    assert.deepEqual(capture.body, { manual_cost_price: 2000 });
+    assert.equal((await res.json()).effective_cost_price, 2000);
+    const audit = JSON.parse(records[0]);
+    assert.equal(audit.actor, 'operator-uuid');
+    assert.equal(audit.caller, 'ops-portal');
+    assert.equal(audit.request_id, 'request-uuid');
+  } finally { console.info = original; }
+});
+
+test('Ops requires audit identity before any database access', async () => {
+  const res = await handleCatalogSkuManualFieldsUpdate(request({ manual_cost_price: 1 }, 'ops-token'),
+    { ...env, OPS_CATALOG_API_TOKEN: 'ops-token' }, 'X', async () => { throw new Error('must not fetch'); });
+  assert.equal(res.status, 403);
+});

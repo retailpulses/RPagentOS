@@ -165,3 +165,17 @@ test('rejects non-GET methods', async () => {
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('allow'), 'GET');
 });
+
+test('Ops SKU reader works with dedicated token and rejects missing actor', async () => {
+  const opsEnv = { SUPABASE_URL: 'https://catalog.test', SUPABASE_SERVICE_ROLE_KEY: 'service-role', OPS_CATALOG_API_TOKEN: 'ops-only' };
+  const req = new Request('https://worker.test/api/internal/catalog/sku/X', {
+    headers: { authorization: 'Bearer ops-only', 'x-ops-actor-sub': 'operator-uuid', 'x-ops-request-id': 'request-uuid' }
+  });
+  const response = await handleCatalogSkuRequest(req, opsEnv, 'X', async (input) => {
+    return Response.json(String(input).includes('/product_variants?') ? [{ id: 'v', item_code: 'X' }] : [{ manual_cost_price: 100, effective_cost_price: 100 }]);
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).manual_cost_price, 100);
+  req.headers.delete('x-ops-actor-sub');
+  assert.equal((await handleCatalogSkuRequest(req, opsEnv, 'X', async () => { throw new Error('must not fetch'); })).status, 403);
+});

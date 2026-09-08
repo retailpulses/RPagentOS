@@ -3,6 +3,7 @@ export interface InternalCatalogEnv {
   INQUIRY_CATALOG_API_TOKEN?: string;
   CATALOGSYNC_PIPELINE_API_TOKEN?: string;
   ORDERMGMT_CATALOG_API_TOKEN?: string;
+  OPS_CATALOG_API_TOKEN?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   CATALOGSYNC_RELAY_URL?: string;
@@ -496,20 +497,36 @@ export function ordermgmtCatalogAuthorized(request: Request, env: InternalCatalo
   );
 }
 
+/** Ops is scoped only to SKU read and three manual fields. Identity is
+ * supplied by the Access-verifying gateway over this dedicated service trust. */
+function opsCatalogAuthorized(request: Request, env: InternalCatalogEnv): boolean {
+  const token = bearerToken(request);
+  return Boolean(token && env.OPS_CATALOG_API_TOKEN
+    && tokensEqual(token, env.OPS_CATALOG_API_TOKEN));
+}
+
+function opsAuditContext(request: Request): { actor: string; request_id: string } | null {
+  const actor = request.headers.get('x-ops-actor-sub') ?? '';
+  const requestId = request.headers.get('x-ops-request-id') ?? '';
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(actor)
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) return null;
+  return { actor, request_id: requestId };
+}
+
 function catalogSkuReadConfigurationReady(
   env: InternalCatalogEnv,
 ): env is InternalCatalogEnv & Required<Pick<InternalCatalogEnv, 'SUPABASE_URL' | 'SUPABASE_SERVICE_ROLE_KEY'>> {
   return Boolean(
     env.SUPABASE_URL
     && env.SUPABASE_SERVICE_ROLE_KEY
-    && (env.INTERNAL_CATALOG_API_TOKEN || env.ORDERMGMT_CATALOG_API_TOKEN),
+    && (env.INTERNAL_CATALOG_API_TOKEN || env.ORDERMGMT_CATALOG_API_TOKEN || env.OPS_CATALOG_API_TOKEN),
   );
 }
 
 function catalogSkuReadAuthorized(request: Request, env: InternalCatalogEnv): boolean {
   const token = bearerToken(request);
   if (!token) return false;
-  return Boolean(
+  return opsCatalogAuthorized(request, env) || Boolean(
     (env.INTERNAL_CATALOG_API_TOKEN
       && tokensEqual(token, env.INTERNAL_CATALOG_API_TOKEN))
     || (env.ORDERMGMT_CATALOG_API_TOKEN
@@ -627,6 +644,9 @@ export async function handleCatalogSkuRequest(
     return json({ error: 'unauthorized' }, 401);
   }
 
+  if (opsCatalogAuthorized(request, env) && !opsAuditContext(request)) {
+    return json({ error: 'ops_identity_required' }, 403);
+  }
   const itemCode = itemCodeParam.trim();
   if (!itemCode) return json({ error: 'item_code_required' }, 400);
 
@@ -716,7 +736,7 @@ function isRealCalendarDate(value: string): boolean {
  * without claiming ownership of derived values: `effective_cost_price` remains
  * computed by the database pricing trigger and is only returned here.
  *
- * Authorization is scoped to ORDERMGMT_CATALOG_API_TOKEN only. Audit evidence
+ * Authorization accepts dedicated OrderMgmt or Ops credentials only. Audit evidence
  * is emitted as a structured owner-side event after the exact-row write; no
  * shared JSON/text field is read-modify-written.
  */
@@ -730,13 +750,18 @@ export async function handleCatalogSkuManualFieldsUpdate(
     return json({ error: 'method_not_allowed' }, 405, { allow: 'PATCH' });
   }
 
-  if (!ordermgmtCatalogConfigurationReady(env)) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY
+    || !(env.ORDERMGMT_CATALOG_API_TOKEN || env.OPS_CATALOG_API_TOKEN)) {
     return json({ error: 'service_not_configured' }, 503);
   }
 
-  if (!ordermgmtCatalogAuthorized(request, env)) {
+  const isOps = opsCatalogAuthorized(request, env);
+  if (!isOps && !ordermgmtCatalogAuthorized(request, env)) {
     return json({ error: 'unauthorized' }, 401);
   }
+
+  const opsContext = isOps ? opsAuditContext(request) : null;
+  if (isOps && !opsContext) return json({ error: 'ops_identity_required' }, 403);
 
   const itemCode = itemCodeParam.trim();
   if (!itemCode) return json({ error: 'item_code_required' }, 400);
@@ -866,7 +891,9 @@ export async function handleCatalogSkuManualFieldsUpdate(
     };
 
     console.info(JSON.stringify({
-      event: 'ordermgmt_manual_product_overrides_applied',
+      event: isOps ? 'ops_manual_product_overrides_applied' : 'ordermgmt_manual_product_overrides_applied',
+      caller: isOps ? 'ops-portal' : 'ordermgmt',
+      ...(opsContext ?? {}),
       occurred_at: new Date().toISOString(),
       item_code: variant.item_code,
       variant_id: variant.id,

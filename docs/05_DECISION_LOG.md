@@ -78,3 +78,8 @@ Implemented as a PostgreSQL BEFORE INSERT/UPDATE trigger on product_commercials 
 ### Impact
 
 ### Follow-up
+
+
+## 2026-09-08 — Product tools owner boundary
+
+Ops product tools use the existing Access login and a dedicated server-side Ops caller to RPagentOS. Only three manual commercial fields are writable. Owner service-auth failures are unavailable errors, never a second operator login. Cost derives through the existing database trigger and is displayed from readback. OrderMgmt remains an independent consumer. Last-write-wins and non-transactional logs are explicit MVP constraints. Related to ops-portal#81 and RPagentOS#121.
