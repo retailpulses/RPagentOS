@@ -89,6 +89,7 @@ test('resolves a lowercase request to canonical item code and preserves zero', a
         manual_presale_arrival_date: '2026-08-20',
         presale_info_protect_until: '2026-08-18',
         effective_cost_price: 1200,
+        restock_date: '2026-08-24',
       },
     ]);
   });
@@ -103,10 +104,12 @@ test('resolves a lowercase request to canonical item code and preserves zero', a
     manual_presale_arrival_date: '2026-08-20',
     presale_info_protect_until: '2026-08-18',
     effective_cost_price: 1200,
+    effective_restock_date: '2026-08-24',
   });
   assert.equal(urls.length, 2);
   assert.match(urls[0], /or=%28item_code\.ilike\.%22n511p407695w%22%29/);
   assert.match(urls[1], /variant_id=eq\.variant-1/);
+  assert.match(urls[1], /restock_date/);
 });
 
 test('returns null fields when a variant has no commercial row', async () => {
@@ -128,6 +131,7 @@ test('returns null fields when a variant has no commercial row', async () => {
     manual_presale_arrival_date: null,
     presale_info_protect_until: null,
     effective_cost_price: null,
+    effective_restock_date: null,
   });
 });
 

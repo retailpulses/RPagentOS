@@ -38,6 +38,7 @@ export interface CatalogSkuResponse {
   manual_presale_arrival_date?: string | null;
   presale_info_protect_until?: string | null;
   effective_cost_price?: number | null;
+  effective_restock_date?: string | null;
 }
 
 export interface CatalogSkuManualFieldsResponse {
@@ -675,7 +676,7 @@ export async function handleCatalogSkuRequest(
       supabaseEnv,
       'product_commercials',
       {
-        select: 'source_available_qty,sync_status,last_sync_success_at,manual_cost_price,manual_presale_arrival_date,presale_info_protect_until,effective_cost_price',
+        select: 'source_available_qty,sync_status,last_sync_success_at,manual_cost_price,manual_presale_arrival_date,presale_info_protect_until,effective_cost_price,restock_date',
         variant_id: `eq.${variant.id}`,
         limit: '1',
       },
@@ -698,6 +699,8 @@ export async function handleCatalogSkuRequest(
         typeof commercial.presale_info_protect_until === 'string' ? commercial.presale_info_protect_until : null,
       effective_cost_price:
         typeof commercial.effective_cost_price === 'number' ? commercial.effective_cost_price : null,
+      effective_restock_date:
+        typeof commercial.restock_date === 'string' ? commercial.restock_date : null,
     };
 
     return json(result);

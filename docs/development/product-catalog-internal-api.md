@@ -25,13 +25,17 @@ Successful response (`200`):
   "manual_cost_price": 2000,
   "manual_presale_arrival_date": "2026-08-20",
   "presale_info_protect_until": "2026-08-19",
-  "effective_cost_price": 2000
+  "effective_cost_price": 2000,
+  "effective_restock_date": "2026-08-24"
 }
 ```
 
 Quantity `0` is a known zero and is never replaced by `null`. Manual override
-and effective-cost fields support the OrderMgmt operator portal. If the SKU
-exists but has no `product_commercials` row, all commercial fields are `null`;
+and effective-cost fields support the OrderMgmt operator portal.
+`effective_restock_date` is the nullable, read-only API name for the currently
+stored `product_commercials.restock_date` consumed downstream. It is not a
+promise that changing a manual field recalculates the date synchronously. If
+the SKU exists but has no `product_commercials` row, all commercial fields are `null`;
 consumers must fail closed on that unknown state. The endpoint returns:
 
 - `400 item_code_required` for an empty path parameter
