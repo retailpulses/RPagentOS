@@ -6,6 +6,16 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "supabase/**"
+      - "db/**"
+      - "database/**"
+      - "migrations/**"
+      - ".github/workflows/database-governance.yml"
+
+concurrency:
+  group: database-governance-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   database-governance:

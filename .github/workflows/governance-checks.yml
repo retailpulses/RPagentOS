@@ -7,6 +7,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: governance-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   governance:
     uses: retailpulses/rp-governance-kit/.github/workflows/governance-checks.yml@12056e83066536fff6804209f049f6de4b107081

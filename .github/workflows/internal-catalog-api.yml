@@ -4,9 +4,29 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "src/**"
+      - "apps/web/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "wrangler*.toml"
+      - ".github/workflows/internal-catalog-api.yml"
   push:
     branches:
       - main
+    paths:
+      - "src/**"
+      - "apps/web/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "wrangler*.toml"
+      - ".github/workflows/internal-catalog-api.yml"
+
+concurrency:
+  group: internal-catalog-api-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
