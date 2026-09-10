@@ -6,7 +6,7 @@
 
 ## 1. 目标与完成标准
 
-Operator 从 `https://ops.homesbliss.net/tools` 打开 **Product update tool**，输入完整 Item Code，读取已有产品，设置或清除与 Order Portal 相同的三个手动字段，并在保存后回读确认。查询不依赖订单、店铺刊登、库存或预售状态。
+Operator 从 `https://ops.homesbliss.net/tools` 打开 **Product update tool**，输入完整 Item Code，读取已有产品，查看只读的当前 Effective Restock Date，设置或清除与 Order Portal 相同的三个手动字段，并在保存后回读确认。查询不依赖订单、店铺刊登、库存或预售状态。
 
 “任何已有产品”指产品主数据中可按 Item Code 唯一定位的 variant；重复身份或缺失商业数据属于数据异常，必须明确报错，不能自动创建或任选一条更新。
 
@@ -18,7 +18,7 @@ Operator 从 `https://ops.homesbliss.net/tools` 打开 **Product update tool**�
 | `/tools/product-update` | 独立查询与编辑页面，刷新或直接打开仍可用 |
 | Search | 完整 Item Code 精确查询，去除首尾空格、大小写不敏感；按 Enter 或 Search 发起 |
 | 产品识别 | 显示 owner 返回的规范 Item Code；首版不依赖新增产品名称/图片接口 |
-| 编辑 | 显示三个手动值和只读 `effective_cost_price`，标明这是生效成本，不是 TCOGS |
+| 编辑 | 显示三个手动值及只读 `effective_cost_price`、`effective_restock_date` |
 | Save | 只提交有变化的字段，提交期间禁止重复点击；成功后重新 GET |
 | Clear | 明确清除字段，提交 `null`；未修改字段不发送 |
 | Cancel / 切换产品 | Cancel 恢复已加载值；有未保存修改时切换产品须提示 |
