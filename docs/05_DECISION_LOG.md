@@ -1,5 +1,27 @@
 # Decision Log
 
+## 2026-09-11 — Restore CatalogSync operational tables under product-catalog ownership
+
+### Context
+
+After restoring the pricing baseline, clean replay failed when the marketplace
+projection referenced `catalog_sync_runs`. RPagentOS issue #32 had already
+adopted the run, failure, and outbox tables, but their executable migration was
+absent from the owner ledger. CatalogSync retains the original table contract.
+
+### Decision
+
+Restore the three tables in the RPagentOS migration stream before the first
+dependent view. Preserve the owner correction from issue #32: `variant_id` is a
+UUID reference, legacy integer columns are converted only when empty, and anon
+and authenticated roles receive no access. Keep runtime and scheduling disabled.
+
+### Impact
+
+Clean replay can reconstruct owner-adopted operational state without hosted
+schema access. Existing hosted definitions are reconciled idempotently and a
+non-empty legacy integer column fails closed instead of losing identity data.
+
 ## 2026-09-11 — Restore the canonical product pricing baseline before dependent migrations
 
 ### Context
