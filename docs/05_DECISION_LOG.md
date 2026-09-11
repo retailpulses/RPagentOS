@@ -1,5 +1,30 @@
 # Decision Log
 
+## 2026-09-11 — Restore the canonical product pricing baseline before dependent migrations
+
+### Context
+
+Clean replay showed that `20260718000000_add_mercari_pricing_trigger.sql`
+depended on three `product_commercials` columns and
+`compute_effective_cost_price(numeric, numeric, numeric, numeric)` that existed
+in the hosted schema but had no executable RPagentOS migration. The exact Phase
+A definitions were recovered from CatalogSync commits `b57f6dc` and `727e6a9`,
+the July pricing incident record, and RPagentOS PR #46.
+
+### Decision
+
+Add the idempotent owner migration `20260717235959` immediately before the first
+canonical dependent migration. Preserve `20260716000000_shared_remote.sql` as a
+comment-only hosted-history artifact, as required by database governance. Do
+not add a Commerce Ops compatibility shim or rename a deployed migration.
+
+### Impact
+
+Clean PostgreSQL replay reconstructs the hosted column types and cost-price
+precedence from repository-controlled sources. The migration performs no data
+backfill, changes no runtime boundary, and is safe to apply later to hosted
+state because all four definitions already exist there.
+
 ## 2026-09-05 — Key Shop4 price import by listing identity
 
 The Shop4 price import requires all 2,590 unique Mercari listing IDs to match.
